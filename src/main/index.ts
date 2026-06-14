@@ -1,13 +1,25 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Menu,
   nativeTheme,
   type MenuItemConstructorOptions,
+  type OpenDialogOptions,
 } from "electron";
 import { join } from "node:path";
+import {
+  importBookFromFile,
+  importErrorMessage,
+  titleFromMetadataOrFileName,
+} from "./library/import-service";
+import { BooksRepository, type BookRecord } from "./storage/books-repository";
 import { initializeLocalStorage, type LocalStorage } from "./storage/database";
+import type {
+  LibraryBookSummary,
+  LibraryImportResult,
+} from "../shared/papercase-api";
 
 app.setName("Papercase");
 
@@ -115,6 +127,72 @@ function createApplicationMenu(): void {
 }
 
 ipcMain.handle("app:getVersion", () => app.getVersion());
+
+ipcMain.handle("library:listBooks", (): LibraryBookSummary[] => {
+  return getBooksRepository().list().map(bookRecordToSummary);
+});
+
+ipcMain.handle("library:importBook", async (): Promise<LibraryImportResult> => {
+  const dialogOptions: OpenDialogOptions = {
+    title: "Import book",
+    properties: ["openFile"],
+    filters: [
+      {
+        name: "EPUB and PDF",
+        extensions: ["epub", "pdf"],
+      },
+    ],
+  };
+  const pickerResult = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions);
+
+  if (pickerResult.canceled || pickerResult.filePaths.length === 0) {
+    return { status: "canceled" };
+  }
+
+  try {
+    const importResult = await importBookFromFile(pickerResult.filePaths[0], {
+      paths: getStorage().paths,
+      repository: getBooksRepository(),
+    });
+
+    return {
+      status: importResult.status,
+      book: bookRecordToSummary(importResult.book),
+    };
+  } catch (error) {
+    return {
+      status: "failed",
+      message: importErrorMessage(error),
+    };
+  }
+});
+
+function getStorage(): LocalStorage {
+  if (!storage) {
+    throw new Error("Papercase storage has not been initialized.");
+  }
+
+  return storage;
+}
+
+function getBooksRepository(): BooksRepository {
+  return new BooksRepository(getStorage().database);
+}
+
+function bookRecordToSummary(record: BookRecord): LibraryBookSummary {
+  return {
+    id: record.id,
+    format: record.format,
+    title: titleFromMetadataOrFileName(record.title, record.originalFileName),
+    originalFileName: record.originalFileName,
+    fileSize: record.fileSize,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    lastOpenedAt: record.lastOpenedAt,
+  };
+}
 
 app.whenReady().then(() => {
   app.setAppUserModelId("com.ajmdz.papercase");

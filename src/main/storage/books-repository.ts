@@ -117,6 +117,14 @@ export class BooksRepository {
     return row ? rowToBookRecord(row) : null;
   }
 
+  findByFileHash(fileHash: string): BookRecord | null {
+    const row = this.database
+      .prepare("SELECT * FROM books WHERE file_hash = ?")
+      .get(fileHash) as BookRow | undefined;
+
+    return row ? rowToBookRecord(row) : null;
+  }
+
   delete(bookId: string): boolean {
     const result = this.database
       .prepare("DELETE FROM books WHERE id = ?")
