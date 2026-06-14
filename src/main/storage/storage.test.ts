@@ -141,6 +141,8 @@ describe("BooksRepository", () => {
         lastOpenedAt: null,
       });
       expect(repository.findById("book-1")).toEqual(created);
+      expect(repository.findByFileHash("sha256:abc123")).toEqual(created);
+      expect(repository.findByFileHash("sha256:missing")).toBeNull();
       expect(repository.list()).toEqual([created]);
 
       expect(repository.delete("book-1")).toBe(true);
