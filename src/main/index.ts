@@ -14,11 +14,20 @@ import {
   importErrorMessage,
   titleFromMetadataOrFileName,
 } from "./library/import-service";
-import { BooksRepository, type BookRecord } from "./storage/books-repository";
+import {
+  removeBookErrorMessage,
+  removeBookFromLibrary,
+} from "./library/remove-service";
+import {
+  BooksRepository,
+  type BookRecord,
+  type ReadingProgressSummary,
+} from "./storage/books-repository";
 import { initializeLocalStorage, type LocalStorage } from "./storage/database";
 import type {
   LibraryBookSummary,
   LibraryImportResult,
+  LibraryRemoveResult,
 } from "../shared/papercase-api";
 
 app.setName("Papercase");
@@ -129,7 +138,7 @@ function createApplicationMenu(): void {
 ipcMain.handle("app:getVersion", () => app.getVersion());
 
 ipcMain.handle("library:listBooks", (): LibraryBookSummary[] => {
-  return getBooksRepository().list().map(bookRecordToSummary);
+  return getBooksRepository().listWithProgress().map(bookRecordToSummary);
 });
 
 ipcMain.handle("library:importBook", async (): Promise<LibraryImportResult> => {
@@ -169,6 +178,34 @@ ipcMain.handle("library:importBook", async (): Promise<LibraryImportResult> => {
   }
 });
 
+ipcMain.handle(
+  "library:removeBook",
+  async (_event, bookId: unknown): Promise<LibraryRemoveResult> => {
+    if (typeof bookId !== "string" || bookId.trim().length === 0) {
+      return {
+        status: "failed",
+        message: removeBookErrorMessage(),
+      };
+    }
+
+    try {
+      const removeResult = await removeBookFromLibrary(bookId, {
+        paths: getStorage().paths,
+        repository: getBooksRepository(),
+      });
+
+      return {
+        status: removeResult.status,
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: removeBookErrorMessage(),
+      };
+    }
+  },
+);
+
 function getStorage(): LocalStorage {
   if (!storage) {
     throw new Error("Papercase storage has not been initialized.");
@@ -181,13 +218,16 @@ function getBooksRepository(): BooksRepository {
   return new BooksRepository(getStorage().database);
 }
 
-function bookRecordToSummary(record: BookRecord): LibraryBookSummary {
+function bookRecordToSummary(
+  record: BookRecord & { progress?: ReadingProgressSummary | null },
+): LibraryBookSummary {
   return {
     id: record.id,
     format: record.format,
     title: titleFromMetadataOrFileName(record.title, record.originalFileName),
     originalFileName: record.originalFileName,
     fileSize: record.fileSize,
+    progress: record.progress ?? null,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     lastOpenedAt: record.lastOpenedAt,

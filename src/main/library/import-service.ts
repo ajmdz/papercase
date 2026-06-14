@@ -551,6 +551,10 @@ function isUsableMetadataTitle(title: string): boolean {
     return false;
   }
 
+  if (/^\d+$/.test(title)) {
+    return false;
+  }
+
   return true;
 }
 

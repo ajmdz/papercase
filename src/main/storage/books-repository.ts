@@ -16,6 +16,16 @@ export type BookRecord = {
   lastOpenedAt: string | null;
 };
 
+export type ReadingProgressSummary = {
+  label: string | null;
+  progressFraction: number | null;
+  updatedAt: string;
+};
+
+export type BookRecordWithProgress = BookRecord & {
+  progress: ReadingProgressSummary | null;
+};
+
 export type CreateBookRecordInput = {
   id?: string;
   format: BookFormat;
@@ -39,6 +49,12 @@ type BookRow = {
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
+};
+
+type BookWithProgressRow = BookRow & {
+  progress_label: string | null;
+  progress_fraction: number | null;
+  progress_updated_at: string | null;
 };
 
 export class BooksRepository {
@@ -109,6 +125,24 @@ export class BooksRepository {
       .map((row) => rowToBookRecord(row as BookRow));
   }
 
+  listWithProgress(): BookRecordWithProgress[] {
+    return this.database
+      .prepare(
+        `
+          SELECT
+            books.*,
+            reading_progress.label AS progress_label,
+            reading_progress.progress_fraction AS progress_fraction,
+            reading_progress.updated_at AS progress_updated_at
+          FROM books
+          LEFT JOIN reading_progress ON reading_progress.book_id = books.id
+          ORDER BY COALESCE(books.last_opened_at, books.created_at) DESC, books.title ASC
+        `,
+      )
+      .all()
+      .map((row) => rowToBookRecordWithProgress(row as BookWithProgressRow));
+  }
+
   findById(bookId: string): BookRecord | null {
     const row = this.database
       .prepare("SELECT * FROM books WHERE id = ?")
@@ -147,5 +181,21 @@ function rowToBookRecord(row: BookRow): BookRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastOpenedAt: row.last_opened_at,
+  };
+}
+
+function rowToBookRecordWithProgress(
+  row: BookWithProgressRow,
+): BookRecordWithProgress {
+  return {
+    ...rowToBookRecord(row),
+    progress:
+      row.progress_updated_at === null
+        ? null
+        : {
+            label: row.progress_label,
+            progressFraction: row.progress_fraction,
+            updatedAt: row.progress_updated_at,
+          },
   };
 }
