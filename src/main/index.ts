@@ -7,10 +7,12 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { join } from "node:path";
+import { initializeLocalStorage, type LocalStorage } from "./storage/database";
 
 app.setName("Papercase");
 
 let mainWindow: BrowserWindow | null = null;
+let storage: LocalStorage | null = null;
 
 function rendererUrl(): string | null {
   return process.env.ELECTRON_RENDERER_URL ?? null;
@@ -116,6 +118,8 @@ ipcMain.handle("app:getVersion", () => app.getVersion());
 
 app.whenReady().then(() => {
   app.setAppUserModelId("com.ajmdz.papercase");
+  storage = initializeLocalStorage(app.getPath("userData"));
+
   createApplicationMenu();
   createMainWindow();
 
@@ -130,4 +134,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  storage?.database.close();
+  storage = null;
 });
