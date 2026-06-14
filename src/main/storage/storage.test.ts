@@ -208,6 +208,60 @@ describe("BooksRepository", () => {
       storage.database.close();
     }
   });
+
+  it("lists book records with saved reading progress", () => {
+    const storage = initializeLocalStorage(makeUserDataDir());
+    const repository = new BooksRepository(storage.database);
+
+    try {
+      const book = repository.create({
+        id: "book-1",
+        format: "pdf",
+        title: "Quiet Systems",
+        fileHash: "sha256:ghi789",
+        storagePath: join(storage.paths.booksDir, "book-1", "source.pdf"),
+        originalFileName: "quiet-systems.pdf",
+        fileSize: 2048,
+      });
+      const updatedAt = new Date().toISOString();
+
+      storage.database
+        .prepare(
+          `
+            INSERT INTO reading_progress (
+              book_id,
+              format,
+              location_json,
+              label,
+              progress_fraction,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          book.id,
+          book.format,
+          JSON.stringify({ page: 12 }),
+          "Page 12",
+          0.25,
+          updatedAt,
+        );
+
+      expect(repository.listWithProgress()).toEqual([
+        {
+          ...book,
+          progress: {
+            label: "Page 12",
+            progressFraction: 0.25,
+            updatedAt,
+          },
+        },
+      ]);
+    } finally {
+      storage.database.close();
+    }
+  });
 });
 
 function makeUserDataDir(): string {

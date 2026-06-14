@@ -9,6 +9,8 @@ const api: PapercaseApi = Object.freeze({
   library: Object.freeze({
     listBooks: () => ipcRenderer.invoke("library:listBooks"),
     importBook: () => ipcRenderer.invoke("library:importBook"),
+    removeBook: (bookId: string) =>
+      ipcRenderer.invoke("library:removeBook", bookId),
   }),
 });
 

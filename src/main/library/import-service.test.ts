@@ -222,6 +222,29 @@ describe("importBookFromFile", () => {
       storage.database.close();
     }
   });
+
+  it("falls back to the filename when PDF title metadata is only digits", async () => {
+    const sourceDir = makeTempDir();
+    const sourcePath = join(sourceDir, "ace-study-guide.pdf");
+    writeFileSync(
+      sourcePath,
+      "%PDF-1.7\n1 0 obj\n<< /Title (536760822) >>\nendobj\n",
+    );
+    const storage = initializeLocalStorage(makeTempDir());
+    const repository = new BooksRepository(storage.database);
+
+    try {
+      const result = await importBookFromFile(sourcePath, {
+        paths: storage.paths,
+        repository,
+      });
+
+      expect(result.status).toBe("imported");
+      expect(result.book.title).toBe("ace study guide");
+    } finally {
+      storage.database.close();
+    }
+  });
 });
 
 describe("import helpers", () => {
@@ -240,6 +263,9 @@ describe("import helpers", () => {
   it("uses the filename when stored metadata titles are not displayable", () => {
     expect(
       titleFromMetadataOrFileName("þÿ536760822", "ace-study-guide.pdf"),
+    ).toBe("ace study guide");
+    expect(
+      titleFromMetadataOrFileName("536760822", "ace-study-guide.pdf"),
     ).toBe("ace study guide");
   });
 });
