@@ -1,9 +1,11 @@
-import type { ReactElement } from "react";
-import { useEffect, useState } from "react";
+import type { ReactElement, RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
+  AppTheme,
   LibraryBookSummary,
   LibraryImportResult,
   LibraryRemoveResult,
+  ReaderLocation,
 } from "../../shared/papercase-api";
 
 type Notice = {
@@ -11,9 +13,38 @@ type Notice = {
   message: string;
 } | null;
 
+type ReaderStatus =
+  | "loading"
+  | "ready"
+  | "not-found"
+  | "missing-file"
+  | "failed";
+
+type ReaderPanel = "contents" | "bookmarks" | "highlights";
+
+type ViewState =
+  | {
+      name: "library";
+    }
+  | {
+      name: "reader";
+      book: LibraryBookSummary;
+      location: ReaderLocation;
+      message: string | null;
+      status: ReaderStatus;
+    };
+
+const themeOptions: Array<{ label: string; value: AppTheme }> = [
+  { label: "System", value: "system" },
+  { label: "Light", value: "light" },
+  { label: "Dark", value: "dark" },
+];
+
 function App(): ReactElement {
   const [version, setVersion] = useState<string | null>(null);
   const [books, setBooks] = useState<LibraryBookSummary[]>([]);
+  const [view, setView] = useState<ViewState>({ name: "library" });
+  const [theme, setTheme] = useState<AppTheme>("system");
   const [isLoadingBooks, setIsLoadingBooks] = useState(() =>
     Boolean(window.papercase),
   );
@@ -65,10 +96,32 @@ function App(): ReactElement {
         }
       });
 
+    api?.settings
+      .getSettings()
+      .then((settings) => {
+        if (isMounted) {
+          setTheme(settings.theme);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setTheme("system");
+        }
+      });
+
     return () => {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (theme === "system") {
+      document.documentElement.removeAttribute("data-theme");
+      return;
+    }
+
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   useEffect(() => {
     if (!notice) {
@@ -161,6 +214,83 @@ function App(): ReactElement {
     setPendingRemovalBookId(bookId);
   }
 
+  async function handleOpenBook(book: LibraryBookSummary): Promise<void> {
+    const api = window.papercase;
+    const openingView = readerViewForBook(book, "loading", null);
+
+    setNotice(null);
+    setOpenOptionsBookId(null);
+    setPendingRemovalBookId(null);
+    setView(openingView);
+
+    if (!api) {
+      setView(readerViewForBook(book, "ready", null));
+      return;
+    }
+
+    try {
+      const result = await api.library.openBook(book.id);
+
+      if (result.status === "ready") {
+        setView(readerViewForBook(book, "ready", null));
+        return;
+      }
+
+      if (result.status === "not-found") {
+        setBooks((currentBooks) =>
+          currentBooks.filter((currentBook) => currentBook.id !== book.id),
+        );
+      }
+
+      setView(readerViewForBook(book, result.status, result.message));
+    } catch {
+      setView(
+        readerViewForBook(book, "failed", "The book could not be opened."),
+      );
+    }
+  }
+
+  function handleBackToLibrary(): void {
+    setNotice(null);
+    setView({ name: "library" });
+  }
+
+  async function handleThemeChange(nextTheme: AppTheme): Promise<void> {
+    const api = window.papercase;
+    const previousTheme = theme;
+
+    if (nextTheme === theme) {
+      return;
+    }
+
+    setTheme(nextTheme);
+
+    if (!api) {
+      return;
+    }
+
+    try {
+      const result = await api.settings.updateSettings({ theme: nextTheme });
+
+      if (result.status === "failed") {
+        setTheme(previousTheme);
+        setNotice({
+          tone: "error",
+          message: result.message,
+        });
+        return;
+      }
+
+      setTheme(result.settings.theme);
+    } catch {
+      setTheme(previousTheme);
+      setNotice({
+        tone: "error",
+        message: "The setting could not be saved.",
+      });
+    }
+  }
+
   function handleCancelRemoveBook(): void {
     if (removingBookId) {
       return;
@@ -231,6 +361,20 @@ function App(): ReactElement {
       ? null
       : (books.find((book) => book.id === pendingRemovalBookId) ?? null);
 
+  if (view.name === "reader") {
+    return (
+      <>
+        <ReaderShell
+          theme={theme}
+          view={view}
+          onBack={handleBackToLibrary}
+          onThemeChange={handleThemeChange}
+        />
+        <NoticeToast notice={notice} />
+      </>
+    );
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="Library navigation">
@@ -273,11 +417,7 @@ function App(): ReactElement {
           </div>
         </header>
 
-        {notice ? (
-          <p className={`notice is-${notice.tone}`} role="status">
-            {notice.message}
-          </p>
-        ) : null}
+        <NoticeToast notice={notice} />
 
         {isLoadingBooks ? (
           <section className="empty-state" aria-label="Loading library">
@@ -309,6 +449,7 @@ function App(): ReactElement {
                 book={book}
                 isOptionsOpen={openOptionsBookId === book.id}
                 key={book.id}
+                onOpen={handleOpenBook}
                 onRequestRemove={handleRequestRemoveBook}
                 onToggleOptions={handleToggleBookOptions}
               />
@@ -330,64 +471,545 @@ function App(): ReactElement {
   );
 }
 
+function NoticeToast({ notice }: { notice: Notice }): ReactElement | null {
+  if (!notice) {
+    return null;
+  }
+
+  return (
+    <p className={`notice is-${notice.tone}`} role="status">
+      {notice.message}
+    </p>
+  );
+}
+
+function ReaderShell({
+  theme,
+  view,
+  onBack,
+  onThemeChange,
+}: {
+  theme: AppTheme;
+  view: Extract<ViewState, { name: "reader" }>;
+  onBack: () => void;
+  onThemeChange: (theme: AppTheme) => void;
+}): ReactElement {
+  const locationLabel = readerLocationLabel(view);
+  const floatingControlsRef = useRef<HTMLDivElement | null>(null);
+  const readerPanelRef = useRef<HTMLElement | null>(null);
+  const [isOptionsOpen, setIsOptionsOpen] = useState(false);
+  const [activeReaderPanel, setActiveReaderPanel] =
+    useState<ReaderPanel | null>(null);
+
+  useEffect(() => {
+    if (!activeReaderPanel) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent): void {
+      if (!(event.target instanceof Node)) {
+        return;
+      }
+
+      if (
+        readerPanelRef.current?.contains(event.target) ||
+        floatingControlsRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setActiveReaderPanel(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setActiveReaderPanel(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeReaderPanel]);
+
+  function handleThemeMenuChange(nextTheme: AppTheme): void {
+    onThemeChange(nextTheme);
+    setIsOptionsOpen(false);
+  }
+
+  function handleReaderPanelSelect(panel: ReaderPanel): void {
+    setActiveReaderPanel((currentPanel) =>
+      currentPanel === panel ? null : panel,
+    );
+  }
+
+  return (
+    <main className="reader-shell" aria-label="Reader">
+      <div className="reader-chrome">
+        <header className="reader-toolbar">
+          <div className="reader-toolbar-primary">
+            <button
+              aria-label="Back to library"
+              className="reader-back-button"
+              title="Back to library"
+              type="button"
+              onClick={onBack}
+            >
+              <ChevronLeftIcon />
+            </button>
+            <div className="reader-title-group">
+              <p className="section-kicker">{view.book.format.toUpperCase()}</p>
+              <h1>{view.book.title}</h1>
+            </div>
+          </div>
+
+          <div className="reader-toolbar-secondary">
+            <p className="reader-location">{locationLabel}</p>
+            <ReaderOptionsMenu
+              isOpen={isOptionsOpen}
+              theme={theme}
+              onOpenChange={setIsOptionsOpen}
+              onThemeChange={handleThemeMenuChange}
+            />
+          </div>
+        </header>
+
+        <FloatingReaderControls
+          activePanel={activeReaderPanel}
+          controlsRef={floatingControlsRef}
+          onSelectPanel={handleReaderPanelSelect}
+        />
+      </div>
+
+      <div
+        className={`reader-layout${
+          activeReaderPanel ? " has-reader-panel" : ""
+        }`}
+      >
+        {activeReaderPanel ? (
+          <aside
+            className="reader-panel"
+            aria-label={readerPanelLabel(activeReaderPanel)}
+            ref={readerPanelRef}
+          >
+            <ReaderPanelContent
+              activePanel={activeReaderPanel}
+              locationLabel={locationLabel}
+              onClose={() => setActiveReaderPanel(null)}
+            />
+          </aside>
+        ) : null}
+
+        <div className="reader-stage-wrap">
+          {view.status === "ready" ? (
+            <ReaderStage book={view.book} />
+          ) : (
+            <ReaderStatusStage view={view} />
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function FloatingReaderControls({
+  activePanel,
+  controlsRef,
+  onSelectPanel,
+}: {
+  activePanel: ReaderPanel | null;
+  controlsRef: RefObject<HTMLDivElement | null>;
+  onSelectPanel: (panel: ReaderPanel) => void;
+}): ReactElement {
+  return (
+    <div
+      className="reader-floating-controls"
+      ref={controlsRef}
+      aria-label="Reader panels"
+    >
+      <div className="reader-floating-button-set">
+        <button
+          aria-label={
+            activePanel === "contents"
+              ? "Hide table of contents"
+              : "Show table of contents"
+          }
+          aria-pressed={activePanel === "contents"}
+          className="reader-floating-button"
+          title="Table of contents"
+          type="button"
+          onClick={() => onSelectPanel("contents")}
+        >
+          <ListIcon />
+        </button>
+        <button
+          aria-label={
+            activePanel === "bookmarks" ? "Hide bookmarks" : "Show bookmarks"
+          }
+          aria-pressed={activePanel === "bookmarks"}
+          className="reader-floating-button"
+          title="Bookmarks"
+          type="button"
+          onClick={() => onSelectPanel("bookmarks")}
+        >
+          <BookmarkPageIcon />
+        </button>
+        <button
+          aria-label={
+            activePanel === "highlights"
+              ? "Hide highlights and notes"
+              : "Show highlights and notes"
+          }
+          aria-pressed={activePanel === "highlights"}
+          className="reader-floating-button"
+          title="Highlights and notes"
+          type="button"
+          onClick={() => onSelectPanel("highlights")}
+        >
+          <HighlighterIcon />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReaderPanelContent({
+  activePanel,
+  locationLabel,
+  onClose,
+}: {
+  activePanel: ReaderPanel;
+  locationLabel: string;
+  onClose: () => void;
+}): ReactElement {
+  if (activePanel === "contents") {
+    return (
+      <section className="reader-panel-section">
+        <h2>Table of contents</h2>
+        <nav aria-label="Table of contents">
+          <a className="reader-toc-link" href="#reader-start" onClick={onClose}>
+            <span>{locationLabel}</span>
+            <span aria-hidden="true">1</span>
+          </a>
+        </nav>
+      </section>
+    );
+  }
+
+  if (activePanel === "bookmarks") {
+    return (
+      <section className="reader-panel-section">
+        <h2>Bookmarks</h2>
+        <p>No bookmarks yet.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="reader-panel-section">
+      <h2>Highlights and notes</h2>
+      <p>No highlights or notes yet.</p>
+    </section>
+  );
+}
+
+function ReaderOptionsMenu({
+  isOpen,
+  theme,
+  onOpenChange,
+  onThemeChange,
+}: {
+  isOpen: boolean;
+  theme: AppTheme;
+  onOpenChange: (isOpen: boolean) => void;
+  onThemeChange: (theme: AppTheme) => void;
+}): ReactElement {
+  const optionsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent): void {
+      if (
+        event.target instanceof Node &&
+        !optionsRef.current?.contains(event.target)
+      ) {
+        onOpenChange(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        onOpenChange(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onOpenChange]);
+
+  return (
+    <div className="reader-options" ref={optionsRef}>
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label="Reader options"
+        className="reader-options-button"
+        title="Reader options"
+        type="button"
+        onClick={() => onOpenChange(!isOpen)}
+      >
+        <GearIcon />
+      </button>
+
+      {isOpen ? (
+        <section
+          aria-label="Reader options"
+          className="reader-options-popover"
+          role="menu"
+        >
+          <div className="reader-options-section">
+            <p className="reader-options-heading">Theme</p>
+            <div className="reader-theme-list">
+              {themeOptions.map((option) => (
+                <button
+                  aria-checked={theme === option.value}
+                  className="reader-theme-item"
+                  key={option.value}
+                  role="menuitemradio"
+                  type="button"
+                  onClick={() => onThemeChange(option.value)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`reader-theme-check${
+                      theme === option.value ? " is-selected" : ""
+                    }`}
+                  />
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function ListIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path
+        d="M8 5h8M8 10h8M8 15h8"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M4 5h.1M4 10h.1M4 15h.1"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2.6"
+      />
+    </svg>
+  );
+}
+
+function BookmarkPageIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path
+        d="M6 3.2h8a1 1 0 0 1 1 1v12.1l-5-2.8-5 2.8V4.2a1 1 0 0 1 1-1Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.7"
+      />
+    </svg>
+  );
+}
+
+function HighlighterIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path
+        d="m12.9 3.3 3.8 3.8-7.2 7.2-4.2 1.1 1.1-4.2 6.5-7.9Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.45"
+      />
+      <path
+        d="m11.5 5.1 3.4 3.4M4 17h11"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.55"
+      />
+    </svg>
+  );
+}
+
+function ChevronLeftIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path
+        d="M12.4 4.2 6.6 10l5.8 5.8"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.2"
+      />
+    </svg>
+  );
+}
+
+function GearIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path
+        d="M10 7.1a2.9 2.9 0 1 1 0 5.8 2.9 2.9 0 0 1 0-5.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="m10.6 2.4.5 1.7c.5.1.9.3 1.3.5l1.6-.8 1.2 1.2-.8 1.6c.2.4.4.9.5 1.3l1.7.5v1.8l-1.7.5c-.1.5-.3.9-.5 1.3l.8 1.6-1.2 1.2-1.6-.8c-.4.2-.9.4-1.3.5l-.5 1.7H8.8l-.5-1.7c-.5-.1-.9-.3-1.3-.5l-1.6.8-1.2-1.2.8-1.6c-.2-.4-.4-.9-.5-1.3l-1.7-.5V8.4l1.7-.5c.1-.5.3-.9.5-1.3l-.8-1.6 1.2-1.2 1.6.8c.4-.2.9-.4 1.3-.5l.5-1.7h1.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+function ReaderStage({ book }: { book: LibraryBookSummary }): ReactElement {
+  return (
+    <section
+      className="reader-stage"
+      id="reader-start"
+      aria-label="Reader area"
+    >
+      <div className="reader-page" aria-hidden="true">
+        <span className="reader-page-format">{book.format.toUpperCase()}</span>
+        <span className="reader-page-title">{book.title}</span>
+      </div>
+    </section>
+  );
+}
+
+function ReaderStatusStage({
+  view,
+}: {
+  view: Extract<ViewState, { name: "reader" }>;
+}): ReactElement {
+  const statusTitle = readerStatusTitle(view.status);
+  const isLoading = view.status === "loading";
+
+  return (
+    <section
+      aria-busy={isLoading}
+      aria-label="Reader status"
+      className="reader-stage reader-stage-status"
+    >
+      <div
+        className="reader-status-panel"
+        role={isLoading ? "status" : "alert"}
+      >
+        <p className="dialog-kicker">{view.book.format.toUpperCase()}</p>
+        <h2>{statusTitle}</h2>
+        {view.message ? <p>{view.message}</p> : null}
+      </div>
+    </section>
+  );
+}
+
 function BookCard({
   book,
   isOptionsOpen,
+  onOpen,
   onRequestRemove,
   onToggleOptions,
 }: {
   book: LibraryBookSummary;
   isOptionsOpen: boolean;
+  onOpen: (book: LibraryBookSummary) => void;
   onRequestRemove: (bookId: string) => void;
   onToggleOptions: (bookId: string) => void;
 }): ReactElement {
   return (
     <article className="book-card">
-      <div className="book-card-top">
-        <div
-          className={`book-cover tone-${coverTone(book.id)}`}
-          aria-hidden="true"
-        >
-          <span className="book-cover-title">{coverTitle(book.title)}</span>
-          <span className="book-cover-format">{book.format.toUpperCase()}</span>
-        </div>
-        <div className="book-options">
-          <button
-            aria-expanded={isOptionsOpen}
-            aria-haspopup="menu"
-            aria-label={`More options for ${book.title}`}
-            className="book-options-button"
-            title="More options"
-            type="button"
-            onClick={() => onToggleOptions(book.id)}
+      <button
+        aria-label={`Open ${book.title}`}
+        className="book-open-button"
+        type="button"
+        onClick={() => onOpen(book)}
+      >
+        <div className="book-card-top">
+          <div
+            className={`book-cover tone-${coverTone(book.id)}`}
+            aria-hidden="true"
           >
-            <span aria-hidden="true">...</span>
-          </button>
-          {isOptionsOpen ? (
-            <div
-              aria-label={`Options for ${book.title}`}
-              className="book-options-menu"
-              role="menu"
-            >
-              <button
-                aria-label={`Remove ${book.title}`}
-                className="book-options-item"
-                role="menuitem"
-                type="button"
-                onClick={() => onRequestRemove(book.id)}
-              >
-                Remove...
-              </button>
-            </div>
-          ) : null}
+            <span className="book-cover-title">{coverTitle(book.title)}</span>
+            <span className="book-cover-format">
+              {book.format.toUpperCase()}
+            </span>
+          </div>
         </div>
-      </div>
-      <div className="book-details">
-        <h2>{book.title}</h2>
-        <p className="book-byline">
-          {book.format.toUpperCase()} / {formatFileSize(book.fileSize)}
-        </p>
-        <p className="book-progress">{formatProgress(book)}</p>
+        <div className="book-details">
+          <h2>{book.title}</h2>
+          <p className="book-byline">
+            {book.format.toUpperCase()} / {formatFileSize(book.fileSize)}
+          </p>
+          <p className="book-progress">{formatProgress(book)}</p>
+        </div>
+      </button>
+      <div className="book-options">
+        <button
+          aria-expanded={isOptionsOpen}
+          aria-haspopup="menu"
+          aria-label={`More options for ${book.title}`}
+          className="book-options-button"
+          title="More options"
+          type="button"
+          onClick={() => onToggleOptions(book.id)}
+        >
+          <span aria-hidden="true">...</span>
+        </button>
+        {isOptionsOpen ? (
+          <div
+            aria-label={`Options for ${book.title}`}
+            className="book-options-menu"
+            role="menu"
+          >
+            <button
+              aria-label={`Remove ${book.title}`}
+              className="book-options-item"
+              role="menuitem"
+              type="button"
+              onClick={() => onRequestRemove(book.id)}
+            >
+              Remove...
+            </button>
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -447,6 +1069,79 @@ function RemoveBookDialog({
       </section>
     </div>
   );
+}
+
+function readerViewForBook(
+  book: LibraryBookSummary,
+  status: ReaderStatus,
+  message: string | null,
+): Extract<ViewState, { name: "reader" }> {
+  return {
+    name: "reader",
+    book,
+    location: readerLocationFromBook(book),
+    message,
+    status,
+  };
+}
+
+function readerLocationFromBook(book: LibraryBookSummary): ReaderLocation {
+  const label = book.progress ? formatProgress(book) : "Start";
+
+  return {
+    bookId: book.id,
+    format: book.format,
+    label,
+    location: {
+      kind: book.progress ? "saved-progress" : "start",
+    },
+  };
+}
+
+function readerLocationLabel(
+  view: Extract<ViewState, { name: "reader" }>,
+): string {
+  if (view.status === "loading") {
+    return "Opening";
+  }
+
+  if (view.status === "not-found" || view.status === "missing-file") {
+    return "Unavailable";
+  }
+
+  if (view.status === "failed") {
+    return "Unable to open";
+  }
+
+  return view.location.label ?? "Start";
+}
+
+function readerPanelLabel(panel: ReaderPanel): string {
+  if (panel === "contents") {
+    return "Table of contents";
+  }
+
+  if (panel === "bookmarks") {
+    return "Bookmarks";
+  }
+
+  return "Highlights and notes";
+}
+
+function readerStatusTitle(status: ReaderStatus): string {
+  if (status === "loading") {
+    return "Opening book";
+  }
+
+  if (status === "not-found") {
+    return "Book removed";
+  }
+
+  if (status === "missing-file") {
+    return "Book unavailable";
+  }
+
+  return "Unable to open book";
 }
 
 function coverTitle(title: string): string {

@@ -14,6 +14,7 @@ import App from "./App";
 
 afterEach(() => {
   cleanup();
+  document.documentElement.removeAttribute("data-theme");
   Reflect.deleteProperty(window, "papercase");
   vi.restoreAllMocks();
 });
@@ -74,6 +75,172 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("Page 12 - 25%")).toBeInTheDocument();
+  });
+
+  it("opens a library item into the reader shell", async () => {
+    const book = makeBook();
+    const openBook = vi.fn().mockResolvedValue({ status: "ready" });
+
+    installPapercaseApi({
+      listBooks: vi.fn().mockResolvedValue([book]),
+      openBook,
+    });
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Quiet Systems" }),
+    );
+
+    expect(
+      await screen.findByRole("main", { name: "Reader" }),
+    ).toBeInTheDocument();
+    expect(openBook).toHaveBeenCalledWith("book-1");
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Quiet Systems" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Back to library" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Table of contents" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show table of contents" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show bookmarks" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show highlights and notes" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show table of contents" }),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Table of contents" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Bookmarks" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Highlights and notes" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Hide table of contents" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show bookmarks" }));
+    expect(
+      screen.queryByRole("heading", { name: "Table of contents" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Bookmarks" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No bookmarks yet.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Hide bookmarks" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show highlights and notes" }),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Bookmarks" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Highlights and notes" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No highlights or notes yet.")).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    expect(
+      screen.queryByRole("heading", { name: "Highlights and notes" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show table of contents" }),
+    );
+    fireEvent.click(screen.getByRole("link", { name: /Start/ }));
+    expect(
+      screen.queryByRole("heading", { name: "Table of contents" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reader options" }));
+    expect(
+      screen.getByRole("menu", { name: "Reader options" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitemradio", { name: "System" }),
+    ).toHaveAttribute("aria-checked", "true");
+    fireEvent.pointerDown(document.body);
+    expect(
+      screen.queryByRole("menu", { name: "Reader options" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to library" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Reading desk" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a reader error state when the local copy is missing", async () => {
+    installPapercaseApi({
+      listBooks: vi.fn().mockResolvedValue([makeBook()]),
+      openBook: vi.fn().mockResolvedValue({
+        status: "missing-file",
+        message: "The local copy for this book is missing.",
+      }),
+    });
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Quiet Systems" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Book unavailable",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The local copy for this book is missing.",
+    );
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Back to library" }),
+    ).toBeInTheDocument();
+  });
+
+  it("persists reader theme changes", async () => {
+    const updateSettings = vi.fn().mockResolvedValue({
+      status: "updated",
+      settings: { theme: "dark" },
+    });
+
+    installPapercaseApi({
+      listBooks: vi.fn().mockResolvedValue([makeBook()]),
+      updateSettings,
+    });
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Quiet Systems" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Reader options" }),
+    );
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Dark" }));
+
+    await waitFor(() => {
+      expect(updateSettings).toHaveBeenCalledWith({ theme: "dark" });
+    });
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    fireEvent.click(screen.getByRole("button", { name: "Reader options" }));
+    expect(screen.getByRole("menuitemradio", { name: "Dark" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 
   it("imports a book and shows a restrained success notice", async () => {
@@ -238,12 +405,21 @@ describe("App", () => {
 
 function installPapercaseApi({
   listBooks,
+  getSettings = vi.fn().mockResolvedValue({ theme: "system" }),
   importBook = vi.fn().mockResolvedValue({ status: "canceled" }),
+  openBook = vi.fn().mockResolvedValue({ status: "ready" }),
   removeBook = vi.fn().mockResolvedValue({ status: "not-found" }),
+  updateSettings = vi.fn().mockResolvedValue({
+    status: "updated",
+    settings: { theme: "system" },
+  }),
 }: {
   listBooks: PapercaseApi["library"]["listBooks"];
+  getSettings?: PapercaseApi["settings"]["getSettings"];
   importBook?: PapercaseApi["library"]["importBook"];
+  openBook?: PapercaseApi["library"]["openBook"];
   removeBook?: PapercaseApi["library"]["removeBook"];
+  updateSettings?: PapercaseApi["settings"]["updateSettings"];
 }): void {
   const api: PapercaseApi = {
     app: {
@@ -251,8 +427,13 @@ function installPapercaseApi({
     },
     library: {
       listBooks,
+      openBook,
       importBook,
       removeBook,
+    },
+    settings: {
+      getSettings,
+      updateSettings,
     },
   };
 
