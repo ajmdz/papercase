@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-family:
     Inter,
     ui-sans-serif,
@@ -32,10 +32,14 @@
   --space-5: 1.5rem;
   --space-6: 2rem;
   --space-7: 3rem;
+  --reader-titlebar-inset: 0rem;
+  --reader-toolbar-height: 3rem;
+  --reader-window-control-inset: 5.6rem;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --page: #101112;
     --surface: #17191a;
     --surface-soft: #222524;
@@ -49,6 +53,26 @@
     --danger-soft: #35201e;
     --shadow: 0 20px 70px rgb(0 0 0 / 0.28);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #101112;
+  --surface: #17191a;
+  --surface-soft: #222524;
+  --ink: #ededeb;
+  --ink-muted: #b4b7b1;
+  --ink-soft: #858b84;
+  --line: #303431;
+  --accent: #8fcab8;
+  --accent-soft: #1d302b;
+  --danger: #dc8f86;
+  --danger-soft: #35201e;
+  --shadow: 0 20px 70px rgb(0 0 0 / 0.28);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -346,6 +370,25 @@ h2 {
   background: color-mix(in srgb, var(--surface) 58%, transparent);
 }
 
+.book-open-button {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.book-open-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: 0.35rem;
+}
+
 .book-card-top {
   position: relative;
   display: grid;
@@ -589,6 +632,494 @@ h2 {
   opacity: 0.6;
 }
 
+.reader-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+  color: var(--ink);
+  background: var(--page);
+}
+
+.reader-chrome {
+  position: relative;
+  z-index: 12;
+}
+
+.reader-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+  min-height: var(--reader-toolbar-height);
+  padding: 0 clamp(0.75rem, 1.5vw, 1.25rem) 0 var(--reader-window-control-inset);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-app-region: no-drag;
+}
+
+.reader-floating-controls {
+  position: absolute;
+  top: 100%;
+  left: 0.85rem;
+  z-index: 15;
+  width: max-content;
+  min-width: 7.65rem;
+  min-height: 3.15rem;
+  padding: 0.5rem 0 0;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.reader-floating-button-set {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 2.1rem);
+  gap: var(--space-1);
+  padding: 0.22rem;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+  border-radius: 999px;
+  opacity: 0;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 0 18px 52px rgb(0 0 0 / 0.14);
+  backdrop-filter: blur(20px);
+  pointer-events: none;
+  transform: translateY(-0.2rem);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.reader-toolbar:hover ~ .reader-floating-controls .reader-floating-button-set,
+.reader-floating-controls:hover .reader-floating-button-set,
+.reader-floating-controls:focus-within .reader-floating-button-set {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.reader-floating-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-muted);
+  background: transparent;
+  cursor: default;
+}
+
+.reader-floating-button svg {
+  width: 1.18rem;
+  height: 1.18rem;
+}
+
+.reader-floating-button:hover,
+.reader-floating-button:focus-visible,
+.reader-floating-button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.reader-toolbar-primary,
+.reader-toolbar-secondary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.reader-toolbar-primary {
+  flex: 0 0 auto;
+  gap: var(--space-3);
+}
+
+.reader-toolbar-secondary {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  -webkit-app-region: no-drag;
+}
+
+.reader-back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  min-width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  box-shadow: none;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.reader-back-button svg,
+.reader-options-button svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.reader-back-button:hover,
+.reader-back-button:focus-visible {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--line) 64%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 72%, transparent);
+}
+
+.reader-title-group {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(46rem, calc(100vw - 24rem));
+  min-width: 0;
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.reader-title-group .section-kicker {
+  display: none;
+}
+
+.reader-title-group h1 {
+  max-width: 100%;
+  margin-top: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+  font-weight: 720;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-location {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.6rem;
+  max-width: 8rem;
+  margin: 0;
+  overflow: hidden;
+  padding: 0 var(--space-1);
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-options {
+  position: relative;
+  display: inline-flex;
+  -webkit-app-region: no-drag;
+}
+
+.reader-options-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  min-width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-muted);
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+
+.reader-options-button:hover,
+.reader-options-button:focus-visible,
+.reader-options-button[aria-expanded="true"] {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--line) 64%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 72%, transparent);
+}
+
+.reader-options-popover {
+  position: absolute;
+  top: calc(100% + var(--space-3));
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: var(--space-4);
+  width: min(18rem, calc(100vw - 2rem));
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: var(--radius);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.24);
+  backdrop-filter: blur(22px);
+}
+
+.reader-options-popover::before {
+  position: absolute;
+  top: -0.45rem;
+  right: 0.85rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.reader-options-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.reader-options-heading {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.reader-theme-list {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.reader-theme-item {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.35rem;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.reader-theme-item:hover,
+.reader-theme-item:focus-visible {
+  background: var(--surface-soft);
+}
+
+.reader-theme-item[aria-checked="true"] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent-soft) 66%, transparent);
+}
+
+.reader-theme-check {
+  position: relative;
+  width: 1rem;
+  height: 1rem;
+}
+
+.reader-theme-check.is-selected::after {
+  position: absolute;
+  top: 0.1rem;
+  left: 0.3rem;
+  width: 0.35rem;
+  height: 0.65rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  content: "";
+  transform: rotate(40deg);
+}
+
+.reader-layout {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.reader-layout.has-reader-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reader-stage-wrap {
+  min-width: 0;
+}
+
+.reader-panel {
+  position: absolute;
+  top: 4.1rem;
+  left: 0.85rem;
+  z-index: 10;
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100vh - var(--reader-toolbar-height) - 5.25rem));
+  overflow-y: auto;
+  padding: var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: var(--radius);
+  opacity: 1;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.2);
+  backdrop-filter: blur(22px);
+  transform: translateX(0);
+  animation: reader-panel-slide-in 150ms ease;
+}
+
+@keyframes reader-panel-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-0.55rem);
+  }
+}
+
+.reader-panel-section {
+  display: grid;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+}
+
+.reader-panel-section h2,
+.reader-panel-section p {
+  margin: 0;
+}
+
+.reader-panel-section h2 {
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.reader-panel-section p {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-panel-section:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.reader-toc-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 680;
+  text-decoration: none;
+}
+
+.reader-toc-link:hover,
+.reader-toc-link:focus-visible {
+  background: var(--surface-soft);
+}
+
+.reader-toc-link span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-toc-link span:last-child {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 640;
+}
+
+.reader-stage {
+  display: grid;
+  min-width: 0;
+  min-height: calc(100vh - var(--reader-toolbar-height));
+  place-items: center;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  background: var(--page);
+}
+
+.reader-page {
+  display: grid;
+  width: min(100%, 34rem);
+  max-height: calc(100vh - 9.5rem);
+  aspect-ratio: 0.72;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.reader-page-format {
+  align-self: start;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.reader-page-title {
+  align-self: end;
+  max-width: 22rem;
+  font-size: clamp(1.35rem, 3vw, 2.15rem);
+  font-weight: 720;
+  line-height: 1.1;
+}
+
+.reader-stage-status {
+  place-items: center;
+}
+
+.reader-status-panel {
+  display: grid;
+  gap: var(--space-3);
+  width: min(100%, 25rem);
+  padding: var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.reader-status-panel h2,
+.reader-status-panel p {
+  margin: 0;
+}
+
+.reader-status-panel h2 {
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+
+.reader-status-panel p {
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -633,5 +1164,54 @@ h2 {
   .book-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(9.75rem, 100%), 1fr));
     gap: var(--space-5) var(--space-4);
+  }
+
+  .reader-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--reader-titlebar-inset) var(--space-5) var(--space-4);
+  }
+
+  .reader-toolbar-primary,
+  .reader-toolbar-secondary {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .reader-title-group h1 {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .reader-title-group {
+    position: static;
+    width: auto;
+    text-align: left;
+    transform: none;
+  }
+
+  .reader-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .reader-panel {
+    left: var(--space-4);
+    width: calc(100vw - 2rem);
+    max-height: 24rem;
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .reader-panel-section {
+    min-width: 0;
+  }
+
+  .reader-stage {
+    min-height: 28rem;
+  }
+
+  .reader-page {
+    width: min(100%, 20rem);
+    max-height: none;
   }
 }

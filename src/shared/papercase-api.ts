@@ -18,6 +18,30 @@ export type LibraryBookSummary = {
   lastOpenedAt: string | null;
 };
 
+export type ReaderLocation = {
+  bookId: string;
+  format: LibraryBookFormat;
+  location: unknown;
+  label?: string;
+};
+
+export type LibraryOpenResult =
+  | {
+      status: "ready";
+    }
+  | {
+      status: "not-found";
+      message: string;
+    }
+  | {
+      status: "missing-file";
+      message: string;
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
 export type LibraryImportResult =
   | {
       status: "imported";
@@ -47,13 +71,40 @@ export type LibraryRemoveResult =
       message: string;
     };
 
+export type AppTheme = "system" | "light" | "dark";
+
+export type AppSettings = {
+  theme: AppTheme;
+};
+
+export type SettingsUpdateInput = {
+  theme?: AppTheme;
+};
+
+export type SettingsUpdateResult =
+  | {
+      status: "updated";
+      settings: AppSettings;
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
 export type PapercaseApi = {
   app: {
     getVersion: () => Promise<string>;
   };
   library: {
     listBooks: () => Promise<LibraryBookSummary[]>;
+    openBook: (bookId: string) => Promise<LibraryOpenResult>;
     importBook: () => Promise<LibraryImportResult>;
     removeBook: (bookId: string) => Promise<LibraryRemoveResult>;
+  };
+  settings: {
+    getSettings: () => Promise<AppSettings>;
+    updateSettings: (
+      input: SettingsUpdateInput,
+    ) => Promise<SettingsUpdateResult>;
   };
 };

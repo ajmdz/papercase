@@ -8,6 +8,7 @@ import { BooksRepository } from "./books-repository";
 import { initializeLocalStorage } from "./database";
 import { runMigrations } from "./migrations";
 import { resolveBookStoragePaths } from "./paths";
+import { SettingsRepository } from "./settings-repository";
 
 type CountRow = {
   count: number;
@@ -258,6 +259,28 @@ describe("BooksRepository", () => {
           },
         },
       ]);
+    } finally {
+      storage.database.close();
+    }
+  });
+});
+
+describe("SettingsRepository", () => {
+  it("defaults to system theme and persists theme updates", () => {
+    const storage = initializeLocalStorage(makeUserDataDir());
+    const repository = new SettingsRepository(storage.database);
+
+    try {
+      expect(repository.getSettings()).toEqual({
+        theme: "system",
+      });
+
+      expect(repository.updateSettings({ theme: "dark" })).toEqual({
+        theme: "dark",
+      });
+      expect(repository.getSettings()).toEqual({
+        theme: "dark",
+      });
     } finally {
       storage.database.close();
     }

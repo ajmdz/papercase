@@ -8,6 +8,7 @@ import {
   type MenuItemConstructorOptions,
   type OpenDialogOptions,
 } from "electron";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   importBookFromFile,
@@ -24,10 +25,16 @@ import {
   type ReadingProgressSummary,
 } from "./storage/books-repository";
 import { initializeLocalStorage, type LocalStorage } from "./storage/database";
+import { SettingsRepository } from "./storage/settings-repository";
 import type {
+  AppSettings,
+  AppTheme,
   LibraryBookSummary,
   LibraryImportResult,
+  LibraryOpenResult,
   LibraryRemoveResult,
+  SettingsUpdateInput,
+  SettingsUpdateResult,
 } from "../shared/papercase-api";
 
 app.setName("Papercase");
@@ -141,6 +148,45 @@ ipcMain.handle("library:listBooks", (): LibraryBookSummary[] => {
   return getBooksRepository().listWithProgress().map(bookRecordToSummary);
 });
 
+ipcMain.handle(
+  "library:openBook",
+  (_event, bookId: unknown): LibraryOpenResult => {
+    if (typeof bookId !== "string" || bookId.trim().length === 0) {
+      return {
+        status: "failed",
+        message: "The book could not be opened.",
+      };
+    }
+
+    try {
+      const book = getBooksRepository().findById(bookId);
+
+      if (!book) {
+        return {
+          status: "not-found",
+          message: "This book is no longer in your library.",
+        };
+      }
+
+      if (!existsSync(book.storagePath)) {
+        return {
+          status: "missing-file",
+          message: "The local copy for this book is missing.",
+        };
+      }
+
+      return {
+        status: "ready",
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "The book could not be opened.",
+      };
+    }
+  },
+);
+
 ipcMain.handle("library:importBook", async (): Promise<LibraryImportResult> => {
   const dialogOptions: OpenDialogOptions = {
     title: "Import book",
@@ -206,6 +252,36 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle("settings:getSettings", (): AppSettings => {
+  return getSettingsRepository().getSettings();
+});
+
+ipcMain.handle(
+  "settings:updateSettings",
+  (_event, input: unknown): SettingsUpdateResult => {
+    const settingsUpdate = parseSettingsUpdateInput(input);
+
+    if (!settingsUpdate) {
+      return {
+        status: "failed",
+        message: "The setting could not be saved.",
+      };
+    }
+
+    try {
+      return {
+        status: "updated",
+        settings: getSettingsRepository().updateSettings(settingsUpdate),
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "The setting could not be saved.",
+      };
+    }
+  },
+);
+
 function getStorage(): LocalStorage {
   if (!storage) {
     throw new Error("Papercase storage has not been initialized.");
@@ -216,6 +292,10 @@ function getStorage(): LocalStorage {
 
 function getBooksRepository(): BooksRepository {
   return new BooksRepository(getStorage().database);
+}
+
+function getSettingsRepository(): SettingsRepository {
+  return new SettingsRepository(getStorage().database);
 }
 
 function bookRecordToSummary(
@@ -232,6 +312,28 @@ function bookRecordToSummary(
     updatedAt: record.updatedAt,
     lastOpenedAt: record.lastOpenedAt,
   };
+}
+
+function parseSettingsUpdateInput(input: unknown): SettingsUpdateInput | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  if (input.theme !== undefined && !isAppTheme(input.theme)) {
+    return null;
+  }
+
+  return {
+    theme: input.theme,
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAppTheme(value: unknown): value is AppTheme {
+  return value === "system" || value === "light" || value === "dark";
 }
 
 app.whenReady().then(() => {
