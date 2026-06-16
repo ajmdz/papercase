@@ -185,10 +185,20 @@ a {
 }
 
 .library-view {
+  position: relative;
   display: grid;
   grid-template-rows: auto auto 1fr;
   min-width: 0;
   padding: 3.75rem clamp(1.5rem, 4vw, 4rem) var(--space-7);
+}
+
+.library-window-drag-strip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3.75rem;
+  -webkit-app-region: drag;
 }
 
 .library-header {
@@ -197,6 +207,7 @@ a {
   justify-content: space-between;
   gap: var(--space-5);
   padding-bottom: var(--space-6);
+  -webkit-app-region: drag;
 }
 
 .library-actions {
@@ -657,7 +668,7 @@ h2 {
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 76%, transparent);
   backdrop-filter: blur(18px);
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .reader-floating-controls {
@@ -742,7 +753,6 @@ h2 {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
-  -webkit-app-region: no-drag;
 }
 
 .reader-back-button {
@@ -1140,6 +1150,10 @@ h2 {
 
   .library-view {
     padding: var(--space-5);
+  }
+
+  .library-window-drag-strip {
+    height: var(--space-5);
   }
 
   .library-header {
