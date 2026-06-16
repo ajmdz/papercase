@@ -398,6 +398,7 @@ function App(): ReactElement {
       </aside>
 
       <section className="library-view" id="library">
+        <div className="library-window-drag-strip" aria-hidden="true" />
         <header className="library-header">
           <div>
             <p className="section-kicker">Library</p>
