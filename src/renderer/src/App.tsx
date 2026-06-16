@@ -1,5 +1,5 @@
 import type { ReactElement, RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AppTheme,
   LibraryBookSummary,
@@ -7,6 +7,7 @@ import type {
   LibraryRemoveResult,
   ReaderLocation,
 } from "../../shared/papercase-api";
+import { PdfReader, type ReaderContentsItem } from "./pdf-reader";
 
 type Notice = {
   tone: "success" | "info" | "error";
@@ -365,6 +366,7 @@ function App(): ReactElement {
     return (
       <>
         <ReaderShell
+          key={view.book.id}
           theme={theme}
           view={view}
           onBack={handleBackToLibrary}
@@ -495,12 +497,28 @@ function ReaderShell({
   onBack: () => void;
   onThemeChange: (theme: AppTheme) => void;
 }): ReactElement {
-  const locationLabel = readerLocationLabel(view);
   const floatingControlsRef = useRef<HTMLDivElement | null>(null);
   const readerPanelRef = useRef<HTMLElement | null>(null);
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [activeReaderPanel, setActiveReaderPanel] =
     useState<ReaderPanel | null>(null);
+  const [readerLocation, setReaderLocation] = useState(view.location);
+  const [readerContents, setReaderContents] = useState<ReaderContentsItem[]>(
+    [],
+  );
+  const pageNavigationRef = useRef<((pageNumber: number) => void) | null>(null);
+  const locationLabel = readerLocationLabel(view, readerLocation);
+
+  const handleReaderLocationChange = useCallback((location: ReaderLocation) => {
+    setReaderLocation(location);
+  }, []);
+
+  const handleReaderContentsChange = useCallback(
+    (contents: ReaderContentsItem[]) => {
+      setReaderContents(contents);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!activeReaderPanel) {
@@ -546,6 +564,15 @@ function ReaderShell({
     setActiveReaderPanel((currentPanel) =>
       currentPanel === panel ? null : panel,
     );
+  }
+
+  function handleReaderContentSelect(item: ReaderContentsItem): void {
+    if (item.pageNumber === null) {
+      return;
+    }
+
+    pageNavigationRef.current?.(item.pageNumber);
+    setActiveReaderPanel(null);
   }
 
   return (
@@ -599,15 +626,22 @@ function ReaderShell({
           >
             <ReaderPanelContent
               activePanel={activeReaderPanel}
+              contents={readerContents}
               locationLabel={locationLabel}
               onClose={() => setActiveReaderPanel(null)}
+              onSelectContent={handleReaderContentSelect}
             />
           </aside>
         ) : null}
 
         <div className="reader-stage-wrap">
           {view.status === "ready" ? (
-            <ReaderStage book={view.book} />
+            <ReaderStage
+              book={view.book}
+              onContentsChange={handleReaderContentsChange}
+              onLocationChange={handleReaderLocationChange}
+              pageNavigationRef={pageNavigationRef}
+            />
           ) : (
             <ReaderStatusStage view={view} />
           )}
@@ -680,23 +714,44 @@ function FloatingReaderControls({
 
 function ReaderPanelContent({
   activePanel,
+  contents,
   locationLabel,
   onClose,
+  onSelectContent,
 }: {
   activePanel: ReaderPanel;
+  contents: ReaderContentsItem[];
   locationLabel: string;
   onClose: () => void;
+  onSelectContent: (item: ReaderContentsItem) => void;
 }): ReactElement {
   if (activePanel === "contents") {
     return (
       <section className="reader-panel-section">
         <h2>Table of contents</h2>
-        <nav aria-label="Table of contents">
-          <a className="reader-toc-link" href="#reader-start" onClick={onClose}>
-            <span>{locationLabel}</span>
-            <span aria-hidden="true">1</span>
-          </a>
-        </nav>
+        {contents.length > 0 ? (
+          <nav aria-label="Table of contents">
+            {contents.map((item) => (
+              <button
+                className={`reader-toc-link level-${Math.min(item.level, 4)}`}
+                disabled={item.pageNumber === null}
+                key={item.id}
+                type="button"
+                onClick={() => onSelectContent(item)}
+              >
+                <span>{item.title}</span>
+                <span aria-hidden="true">
+                  {item.pageNumber === null ? "-" : item.pageNumber}
+                </span>
+              </button>
+            ))}
+          </nav>
+        ) : (
+          <p>No table of contents in this book.</p>
+        )}
+        <button className="reader-toc-current" type="button" onClick={onClose}>
+          {locationLabel}
+        </button>
       </section>
     );
   }
@@ -901,7 +956,34 @@ function GearIcon(): ReactElement {
   );
 }
 
-function ReaderStage({ book }: { book: LibraryBookSummary }): ReactElement {
+function ReaderStage({
+  book,
+  onContentsChange,
+  onLocationChange,
+  pageNavigationRef,
+}: {
+  book: LibraryBookSummary;
+  onContentsChange: (contents: ReaderContentsItem[]) => void;
+  onLocationChange: (location: ReaderLocation) => void;
+  pageNavigationRef: RefObject<((pageNumber: number) => void) | null>;
+}): ReactElement {
+  if (book.format === "pdf") {
+    return (
+      <section
+        className="reader-stage reader-stage-pdf"
+        id="reader-start"
+        aria-label="Reader area"
+      >
+        <PdfReader
+          book={book}
+          onContentsChange={onContentsChange}
+          onLocationChange={onLocationChange}
+          pageNavigationRef={pageNavigationRef}
+        />
+      </section>
+    );
+  }
+
   return (
     <section
       className="reader-stage"
@@ -1101,6 +1183,7 @@ function readerLocationFromBook(book: LibraryBookSummary): ReaderLocation {
 
 function readerLocationLabel(
   view: Extract<ViewState, { name: "reader" }>,
+  location: ReaderLocation,
 ): string {
   if (view.status === "loading") {
     return "Opening";
@@ -1114,7 +1197,7 @@ function readerLocationLabel(
     return "Unable to open";
   }
 
-  return view.location.label ?? "Start";
+  return location.label ?? "Start";
 }
 
 function readerPanelLabel(panel: ReaderPanel): string {

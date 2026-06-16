@@ -25,6 +25,17 @@ export type ReaderLocation = {
   label?: string;
 };
 
+export type PdfPageViewMode = "single" | "two-page";
+export type PdfZoomMode = "auto" | "actual" | "custom";
+
+export type PdfReaderLocation = {
+  pageNumber: number;
+  pageCount: number;
+  viewMode: PdfPageViewMode;
+  zoom: number;
+  zoomMode: PdfZoomMode;
+};
+
 export type LibraryOpenResult =
   | {
       status: "ready";
@@ -91,6 +102,47 @@ export type SettingsUpdateResult =
       message: string;
     };
 
+export type PdfDocumentLoadResult =
+  | {
+      status: "loaded";
+      data: Uint8Array;
+      progress: ReaderLocation | null;
+    }
+  | {
+      status: "not-found";
+      message: string;
+    }
+  | {
+      status: "not-pdf";
+      message: string;
+    }
+  | {
+      status: "missing-file";
+      message: string;
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
+export type SaveReadingProgressInput = {
+  bookId: string;
+  format: LibraryBookFormat;
+  location: PdfReaderLocation;
+  label: string;
+  progressFraction: number | null;
+};
+
+export type SaveReadingProgressResult =
+  | {
+      status: "saved";
+      progress: LibraryBookProgress;
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
 export type PapercaseApi = {
   app: {
     getVersion: () => Promise<string>;
@@ -106,5 +158,11 @@ export type PapercaseApi = {
     updateSettings: (
       input: SettingsUpdateInput,
     ) => Promise<SettingsUpdateResult>;
+  };
+  reader: {
+    loadPdf: (bookId: string) => Promise<PdfDocumentLoadResult>;
+    saveProgress: (
+      input: SaveReadingProgressInput,
+    ) => Promise<SaveReadingProgressResult>;
   };
 };

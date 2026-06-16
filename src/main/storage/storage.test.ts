@@ -263,6 +263,64 @@ describe("BooksRepository", () => {
       storage.database.close();
     }
   });
+
+  it("saves and replaces reading progress for a book", () => {
+    const storage = initializeLocalStorage(makeUserDataDir());
+    const repository = new BooksRepository(storage.database);
+
+    try {
+      repository.create({
+        id: "book-1",
+        format: "pdf",
+        title: "Quiet Systems",
+        fileHash: "sha256:jkl012",
+        storagePath: join(storage.paths.booksDir, "book-1", "source.pdf"),
+        originalFileName: "quiet-systems.pdf",
+        fileSize: 2048,
+      });
+
+      const firstProgress = repository.saveProgress({
+        bookId: "book-1",
+        format: "pdf",
+        location: {
+          pageNumber: 3,
+          pageCount: 12,
+          viewMode: "single",
+          zoom: 1,
+        },
+        label: "Page 3 of 12",
+        progressFraction: 0.25,
+      });
+
+      expect(repository.findProgressByBookId("book-1")).toEqual(firstProgress);
+
+      const nextProgress = repository.saveProgress({
+        bookId: "book-1",
+        format: "pdf",
+        location: {
+          pageNumber: 9,
+          pageCount: 12,
+          viewMode: "two-page",
+          zoom: 1.1,
+        },
+        label: "Page 9 of 12",
+        progressFraction: 0.75,
+      });
+
+      expect(repository.findProgressByBookId("book-1")).toEqual(nextProgress);
+      expect(repository.listWithProgress()[0]).toMatchObject({
+        id: "book-1",
+        lastOpenedAt: nextProgress.updatedAt,
+        progress: {
+          label: "Page 9 of 12",
+          progressFraction: 0.75,
+          updatedAt: nextProgress.updatedAt,
+        },
+      });
+    } finally {
+      storage.database.close();
+    }
+  });
 });
 
 describe("SettingsRepository", () => {

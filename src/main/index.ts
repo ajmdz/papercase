@@ -9,6 +9,7 @@ import {
   type OpenDialogOptions,
 } from "electron";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   importBookFromFile,
@@ -22,6 +23,7 @@ import {
 import {
   BooksRepository,
   type BookRecord,
+  type ReadingProgressRecord,
   type ReadingProgressSummary,
 } from "./storage/books-repository";
 import { initializeLocalStorage, type LocalStorage } from "./storage/database";
@@ -33,6 +35,11 @@ import type {
   LibraryImportResult,
   LibraryOpenResult,
   LibraryRemoveResult,
+  PdfDocumentLoadResult,
+  PdfReaderLocation,
+  ReaderLocation,
+  SaveReadingProgressInput,
+  SaveReadingProgressResult,
   SettingsUpdateInput,
   SettingsUpdateResult,
 } from "../shared/papercase-api";
@@ -282,6 +289,106 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle(
+  "reader:loadPdf",
+  async (_event, bookId: unknown): Promise<PdfDocumentLoadResult> => {
+    if (typeof bookId !== "string" || bookId.trim().length === 0) {
+      return {
+        status: "failed",
+        message: "The PDF could not be opened.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(bookId);
+
+      if (!book) {
+        return {
+          status: "not-found",
+          message: "This book is no longer in your library.",
+        };
+      }
+
+      if (book.format !== "pdf") {
+        return {
+          status: "not-pdf",
+          message: "This reader is only available for PDFs.",
+        };
+      }
+
+      if (!existsSync(book.storagePath)) {
+        return {
+          status: "missing-file",
+          message: "The local copy for this PDF is missing.",
+        };
+      }
+
+      const fileData = await readFile(book.storagePath);
+      const progress = repository.findProgressByBookId(book.id);
+
+      return {
+        status: "loaded",
+        data: new Uint8Array(fileData),
+        progress: progress ? progressRecordToReaderLocation(progress) : null,
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "The PDF could not be opened.",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "reader:saveProgress",
+  (_event, input: unknown): SaveReadingProgressResult => {
+    const progressInput = parseSaveReadingProgressInput(input);
+
+    if (!progressInput) {
+      return {
+        status: "failed",
+        message: "Reading progress could not be saved.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(progressInput.bookId);
+
+      if (!book || book.format !== progressInput.format) {
+        return {
+          status: "failed",
+          message: "Reading progress could not be saved.",
+        };
+      }
+
+      const progress = repository.saveProgress({
+        bookId: progressInput.bookId,
+        format: progressInput.format,
+        location: progressInput.location,
+        label: progressInput.label,
+        progressFraction: progressInput.progressFraction,
+      });
+
+      return {
+        status: "saved",
+        progress: {
+          label: progress.label,
+          progressFraction: progress.progressFraction,
+          updatedAt: progress.updatedAt,
+        },
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "Reading progress could not be saved.",
+      };
+    }
+  },
+);
+
 function getStorage(): LocalStorage {
   if (!storage) {
     throw new Error("Papercase storage has not been initialized.");
@@ -314,6 +421,17 @@ function bookRecordToSummary(
   };
 }
 
+function progressRecordToReaderLocation(
+  progress: ReadingProgressRecord,
+): ReaderLocation {
+  return {
+    bookId: progress.bookId,
+    format: progress.format,
+    location: progress.location,
+    label: progress.label ?? undefined,
+  };
+}
+
 function parseSettingsUpdateInput(input: unknown): SettingsUpdateInput | null {
   if (!isObject(input)) {
     return null;
@@ -328,12 +446,100 @@ function parseSettingsUpdateInput(input: unknown): SettingsUpdateInput | null {
   };
 }
 
+function parseSaveReadingProgressInput(
+  input: unknown,
+): SaveReadingProgressInput | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  if (
+    typeof input.bookId !== "string" ||
+    input.bookId.trim().length === 0 ||
+    input.format !== "pdf" ||
+    typeof input.label !== "string"
+  ) {
+    return null;
+  }
+
+  const location = parsePdfReaderLocation(input.location);
+
+  if (!location) {
+    return null;
+  }
+
+  if (
+    input.progressFraction !== null &&
+    (typeof input.progressFraction !== "number" ||
+      !Number.isFinite(input.progressFraction) ||
+      input.progressFraction < 0 ||
+      input.progressFraction > 1)
+  ) {
+    return null;
+  }
+
+  return {
+    bookId: input.bookId,
+    format: input.format,
+    location,
+    label: input.label,
+    progressFraction: input.progressFraction,
+  };
+}
+
+function parsePdfReaderLocation(input: unknown): PdfReaderLocation | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  const pageNumber = input.pageNumber;
+  const pageCount = input.pageCount;
+  const viewMode = input.viewMode;
+  const zoom = input.zoom;
+  const zoomMode = input.zoomMode;
+
+  if (
+    typeof pageNumber !== "number" ||
+    !Number.isInteger(pageNumber) ||
+    typeof pageCount !== "number" ||
+    !Number.isInteger(pageCount) ||
+    (viewMode !== "single" && viewMode !== "two-page") ||
+    typeof zoom !== "number" ||
+    !Number.isFinite(zoom) ||
+    !isPdfZoomMode(zoomMode)
+  ) {
+    return null;
+  }
+
+  if (
+    pageNumber < 1 ||
+    pageCount < 1 ||
+    pageNumber > pageCount ||
+    zoom < 0.5 ||
+    zoom > 2
+  ) {
+    return null;
+  }
+
+  return {
+    pageNumber,
+    pageCount,
+    viewMode,
+    zoom,
+    zoomMode,
+  };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isAppTheme(value: unknown): value is AppTheme {
   return value === "system" || value === "light" || value === "dark";
+}
+
+function isPdfZoomMode(value: unknown): value is PdfReaderLocation["zoomMode"] {
+  return value === "auto" || value === "actual" || value === "custom";
 }
 
 app.whenReady().then(() => {

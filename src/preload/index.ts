@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   PapercaseApi,
+  SaveReadingProgressInput,
   SettingsUpdateInput,
 } from "../shared/papercase-api";
 
@@ -21,6 +22,11 @@ const api: PapercaseApi = Object.freeze({
     getSettings: () => ipcRenderer.invoke("settings:getSettings"),
     updateSettings: (input: SettingsUpdateInput) =>
       ipcRenderer.invoke("settings:updateSettings", input),
+  }),
+  reader: Object.freeze({
+    loadPdf: (bookId: string) => ipcRenderer.invoke("reader:loadPdf", bookId),
+    saveProgress: (input: SaveReadingProgressInput) =>
+      ipcRenderer.invoke("reader:saveProgress", input),
   }),
 });
 

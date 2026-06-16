@@ -22,6 +22,12 @@ export type ReadingProgressSummary = {
   updatedAt: string;
 };
 
+export type ReadingProgressRecord = ReadingProgressSummary & {
+  bookId: string;
+  format: BookFormat;
+  location: unknown;
+};
+
 export type BookRecordWithProgress = BookRecord & {
   progress: ReadingProgressSummary | null;
 };
@@ -35,6 +41,14 @@ export type CreateBookRecordInput = {
   coverPath?: string | null;
   originalFileName: string;
   fileSize: number;
+};
+
+export type SaveReadingProgressRecordInput = {
+  bookId: string;
+  format: BookFormat;
+  location: unknown;
+  label: string | null;
+  progressFraction: number | null;
 };
 
 type BookRow = {
@@ -55,6 +69,15 @@ type BookWithProgressRow = BookRow & {
   progress_label: string | null;
   progress_fraction: number | null;
   progress_updated_at: string | null;
+};
+
+type ReadingProgressRow = {
+  book_id: string;
+  format: BookFormat;
+  location_json: string;
+  label: string | null;
+  progress_fraction: number | null;
+  updated_at: string;
 };
 
 export class BooksRepository {
@@ -166,6 +189,67 @@ export class BooksRepository {
 
     return Number(result.changes) > 0;
   }
+
+  findProgressByBookId(bookId: string): ReadingProgressRecord | null {
+    const row = this.database
+      .prepare("SELECT * FROM reading_progress WHERE book_id = ?")
+      .get(bookId) as ReadingProgressRow | undefined;
+
+    return row ? rowToReadingProgressRecord(row) : null;
+  }
+
+  saveProgress(input: SaveReadingProgressRecordInput): ReadingProgressRecord {
+    const now = new Date().toISOString();
+    const locationJson = JSON.stringify(input.location);
+
+    this.database
+      .prepare(
+        `
+          INSERT INTO reading_progress (
+            book_id,
+            format,
+            location_json,
+            label,
+            progress_fraction,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(book_id) DO UPDATE SET
+            format = excluded.format,
+            location_json = excluded.location_json,
+            label = excluded.label,
+            progress_fraction = excluded.progress_fraction,
+            updated_at = excluded.updated_at
+        `,
+      )
+      .run(
+        input.bookId,
+        input.format,
+        locationJson,
+        input.label,
+        input.progressFraction,
+        now,
+      );
+
+    this.database
+      .prepare(
+        `
+          UPDATE books
+          SET last_opened_at = ?, updated_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(now, now, input.bookId);
+
+    return {
+      bookId: input.bookId,
+      format: input.format,
+      location: input.location,
+      label: input.label,
+      progressFraction: input.progressFraction,
+      updatedAt: now,
+    };
+  }
 }
 
 function rowToBookRecord(row: BookRow): BookRecord {
@@ -197,5 +281,18 @@ function rowToBookRecordWithProgress(
             progressFraction: row.progress_fraction,
             updatedAt: row.progress_updated_at,
           },
+  };
+}
+
+function rowToReadingProgressRecord(
+  row: ReadingProgressRow,
+): ReadingProgressRecord {
+  return {
+    bookId: row.book_id,
+    format: row.format,
+    location: JSON.parse(row.location_json) as unknown,
+    label: row.label,
+    progressFraction: row.progress_fraction,
+    updatedAt: row.updated_at,
   };
 }
