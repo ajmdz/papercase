@@ -162,7 +162,10 @@ describe("App", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Show table of contents" }),
     );
-    fireEvent.click(screen.getByRole("link", { name: /Start/ }));
+    expect(
+      screen.getByText("No table of contents in this book."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(
       screen.queryByRole("heading", { name: "Table of contents" }),
     ).not.toBeInTheDocument();
@@ -413,6 +416,18 @@ function installPapercaseApi({
     status: "updated",
     settings: { theme: "system" },
   }),
+  loadPdf = vi.fn().mockResolvedValue({
+    status: "failed",
+    message: "PDF rendering is unavailable in this test.",
+  }),
+  saveProgress = vi.fn().mockResolvedValue({
+    status: "saved",
+    progress: {
+      label: "Page 1 of 1",
+      progressFraction: 1,
+      updatedAt: "2026-06-14T00:00:00.000Z",
+    },
+  }),
 }: {
   listBooks: PapercaseApi["library"]["listBooks"];
   getSettings?: PapercaseApi["settings"]["getSettings"];
@@ -420,6 +435,8 @@ function installPapercaseApi({
   openBook?: PapercaseApi["library"]["openBook"];
   removeBook?: PapercaseApi["library"]["removeBook"];
   updateSettings?: PapercaseApi["settings"]["updateSettings"];
+  loadPdf?: PapercaseApi["reader"]["loadPdf"];
+  saveProgress?: PapercaseApi["reader"]["saveProgress"];
 }): void {
   const api: PapercaseApi = {
     app: {
@@ -434,6 +451,10 @@ function installPapercaseApi({
     settings: {
       getSettings,
       updateSettings,
+    },
+    reader: {
+      loadPdf,
+      saveProgress,
     },
   };
 
