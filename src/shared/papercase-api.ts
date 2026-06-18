@@ -27,6 +27,7 @@ export type ReaderLocation = {
 
 export type PdfPageViewMode = "single" | "two-page";
 export type PdfZoomMode = "auto" | "actual" | "custom";
+export type EpubPageViewMode = "single" | "two-page";
 
 export type PdfReaderLocation = {
   pageNumber: number;
@@ -34,6 +35,16 @@ export type PdfReaderLocation = {
   viewMode: PdfPageViewMode;
   zoom: number;
   zoomMode: PdfZoomMode;
+};
+
+export type EpubReaderLocation = {
+  cfi: string;
+  href: string | null;
+  chapterTitle: string | null;
+  displayedPage: number | null;
+  displayedTotal: number | null;
+  fontSizePercent: number;
+  viewMode: EpubPageViewMode;
 };
 
 export type LibraryOpenResult =
@@ -125,13 +136,48 @@ export type PdfDocumentLoadResult =
       message: string;
     };
 
-export type SaveReadingProgressInput = {
+export type EpubDocumentLoadResult =
+  | {
+      status: "loaded";
+      data: Uint8Array;
+      progress: ReaderLocation | null;
+    }
+  | {
+      status: "not-found";
+      message: string;
+    }
+  | {
+      status: "not-epub";
+      message: string;
+    }
+  | {
+      status: "missing-file";
+      message: string;
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
+export type SavePdfReadingProgressInput = {
   bookId: string;
-  format: LibraryBookFormat;
+  format: "pdf";
   location: PdfReaderLocation;
   label: string;
   progressFraction: number | null;
 };
+
+export type SaveEpubReadingProgressInput = {
+  bookId: string;
+  format: "epub";
+  location: EpubReaderLocation;
+  label: string;
+  progressFraction: number | null;
+};
+
+export type SaveReadingProgressInput =
+  | SavePdfReadingProgressInput
+  | SaveEpubReadingProgressInput;
 
 export type SaveReadingProgressResult =
   | {
@@ -161,6 +207,7 @@ export type PapercaseApi = {
   };
   reader: {
     loadPdf: (bookId: string) => Promise<PdfDocumentLoadResult>;
+    loadEpub: (bookId: string) => Promise<EpubDocumentLoadResult>;
     saveProgress: (
       input: SaveReadingProgressInput,
     ) => Promise<SaveReadingProgressResult>;

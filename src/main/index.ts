@@ -31,6 +31,8 @@ import { SettingsRepository } from "./storage/settings-repository";
 import type {
   AppSettings,
   AppTheme,
+  EpubDocumentLoadResult,
+  EpubReaderLocation,
   LibraryBookSummary,
   LibraryImportResult,
   LibraryOpenResult,
@@ -342,6 +344,58 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "reader:loadEpub",
+  async (_event, bookId: unknown): Promise<EpubDocumentLoadResult> => {
+    if (typeof bookId !== "string" || bookId.trim().length === 0) {
+      return {
+        status: "failed",
+        message: "The EPUB could not be opened.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(bookId);
+
+      if (!book) {
+        return {
+          status: "not-found",
+          message: "This book is no longer in your library.",
+        };
+      }
+
+      if (book.format !== "epub") {
+        return {
+          status: "not-epub",
+          message: "This reader is only available for EPUBs.",
+        };
+      }
+
+      if (!existsSync(book.storagePath)) {
+        return {
+          status: "missing-file",
+          message: "The local copy for this EPUB is missing.",
+        };
+      }
+
+      const fileData = await readFile(book.storagePath);
+      const progress = repository.findProgressByBookId(book.id);
+
+      return {
+        status: "loaded",
+        data: new Uint8Array(fileData),
+        progress: progress ? progressRecordToReaderLocation(progress) : null,
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "The EPUB could not be opened.",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
   "reader:saveProgress",
   (_event, input: unknown): SaveReadingProgressResult => {
     const progressInput = parseSaveReadingProgressInput(input);
@@ -456,15 +510,9 @@ function parseSaveReadingProgressInput(
   if (
     typeof input.bookId !== "string" ||
     input.bookId.trim().length === 0 ||
-    input.format !== "pdf" ||
+    (input.format !== "pdf" && input.format !== "epub") ||
     typeof input.label !== "string"
   ) {
-    return null;
-  }
-
-  const location = parsePdfReaderLocation(input.location);
-
-  if (!location) {
     return null;
   }
 
@@ -478,12 +526,80 @@ function parseSaveReadingProgressInput(
     return null;
   }
 
+  if (input.format === "pdf") {
+    const location = parsePdfReaderLocation(input.location);
+
+    return location
+      ? {
+          bookId: input.bookId,
+          format: "pdf",
+          location,
+          label: input.label,
+          progressFraction: input.progressFraction,
+        }
+      : null;
+  }
+
+  const location = parseEpubReaderLocation(input.location);
+
+  return location
+    ? {
+        bookId: input.bookId,
+        format: "epub",
+        location,
+        label: input.label,
+        progressFraction: input.progressFraction,
+      }
+    : null;
+}
+
+function parseEpubReaderLocation(input: unknown): EpubReaderLocation | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  const cfi = input.cfi;
+  const href = input.href;
+  const chapterTitle = input.chapterTitle;
+  const displayedPage = input.displayedPage;
+  const displayedTotal = input.displayedTotal;
+  const fontSizePercent = input.fontSizePercent;
+  const viewMode = input.viewMode;
+
+  if (
+    typeof cfi !== "string" ||
+    cfi.trim().length === 0 ||
+    !isNullableString(href) ||
+    !isNullableString(chapterTitle) ||
+    !isNullableInteger(displayedPage) ||
+    !isNullableInteger(displayedTotal) ||
+    typeof fontSizePercent !== "number" ||
+    !Number.isInteger(fontSizePercent) ||
+    (viewMode !== "single" && viewMode !== "two-page")
+  ) {
+    return null;
+  }
+
+  if (
+    (displayedPage !== null && displayedPage < 1) ||
+    (displayedTotal !== null && displayedTotal < 1) ||
+    (displayedPage !== null &&
+      displayedTotal !== null &&
+      displayedPage > displayedTotal) ||
+    fontSizePercent < 80 ||
+    fontSizePercent > 160
+  ) {
+    return null;
+  }
+
   return {
-    bookId: input.bookId,
-    format: input.format,
-    location,
-    label: input.label,
-    progressFraction: input.progressFraction,
+    cfi,
+    href,
+    chapterTitle,
+    displayedPage,
+    displayedTotal,
+    fontSizePercent,
+    viewMode,
   };
 }
 
@@ -532,6 +648,16 @@ function parsePdfReaderLocation(input: unknown): PdfReaderLocation | null {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isNullableInteger(value: unknown): value is number | null {
+  return (
+    value === null || (typeof value === "number" && Number.isInteger(value))
+  );
 }
 
 function isAppTheme(value: unknown): value is AppTheme {

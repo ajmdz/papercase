@@ -19,19 +19,18 @@ import type {
   PdfZoomMode,
   ReaderLocation,
 } from "../../shared/papercase-api";
-
-export type ReaderContentsItem = {
-  id: string;
-  title: string;
-  pageNumber: number | null;
-  level: number;
-};
+import type {
+  ReaderContentsItem,
+  ReaderNavigationTarget,
+} from "./reader-types";
 
 type PdfReaderProps = {
   book: LibraryBookSummary;
   onContentsChange: (contents: ReaderContentsItem[]) => void;
   onLocationChange: (location: ReaderLocation) => void;
-  pageNavigationRef: RefObject<((pageNumber: number) => void) | null>;
+  pageNavigationRef: RefObject<
+    ((target: ReaderNavigationTarget) => void) | null
+  >;
 };
 
 type PdfLoadStatus =
@@ -305,6 +304,15 @@ export function PdfReader({
     [pageCount],
   );
 
+  const goToReaderTarget = useCallback(
+    (target: ReaderNavigationTarget) => {
+      if (typeof target === "number") {
+        goToPage(target);
+      }
+    },
+    [goToPage],
+  );
+
   const goToPreviousPage = useCallback(() => {
     setCurrentPage((pageNumber) =>
       clampPage(pageNumber - pageStep(viewMode), pageCount),
@@ -320,14 +328,14 @@ export function PdfReader({
   }, [pageCount, viewMode]);
 
   useEffect(() => {
-    pageNavigationRef.current = goToPage;
+    pageNavigationRef.current = goToReaderTarget;
 
     return () => {
-      if (pageNavigationRef.current === goToPage) {
+      if (pageNavigationRef.current === goToReaderTarget) {
         pageNavigationRef.current = null;
       }
     };
-  }, [goToPage, pageNavigationRef]);
+  }, [goToReaderTarget, pageNavigationRef]);
 
   useEffect(() => {
     if (status.name !== "ready" || pageCount < 1) {
@@ -837,12 +845,15 @@ async function flattenPdfOutline(
       items.push({
         id: `${level}-${itemPath}-${title}`,
         title,
-        pageNumber: await resolveOutlinePageNumber(
-          pdfDocument,
-          outlineItem.dest,
-        ),
+        target: await resolveOutlinePageNumber(pdfDocument, outlineItem.dest),
+        label: null,
         level,
       });
+
+      const lastItem = items[items.length - 1];
+      if (typeof lastItem.target === "number") {
+        lastItem.label = String(lastItem.target);
+      }
     }
 
     if (outlineItem.items && outlineItem.items.length > 0) {

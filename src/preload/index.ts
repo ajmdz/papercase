@@ -25,6 +25,7 @@ const api: PapercaseApi = Object.freeze({
   }),
   reader: Object.freeze({
     loadPdf: (bookId: string) => ipcRenderer.invoke("reader:loadPdf", bookId),
+    loadEpub: (bookId: string) => ipcRenderer.invoke("reader:loadEpub", bookId),
     saveProgress: (input: SaveReadingProgressInput) =>
       ipcRenderer.invoke("reader:saveProgress", input),
   }),
