@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  BookmarkSummary,
   LibraryBookSummary,
   PapercaseApi,
 } from "../../shared/papercase-api";
@@ -138,7 +139,7 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: "Bookmarks" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("No bookmarks yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No bookmarks yet.")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Hide bookmarks" }),
     ).toHaveAttribute("aria-pressed", "true");
@@ -187,6 +188,46 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: "Reading desk" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows saved bookmarks and deletes them from the reader panel", async () => {
+    const bookmark = makeBookmark();
+    const listBookmarks = vi.fn().mockResolvedValue({
+      status: "loaded",
+      bookmarks: [bookmark],
+    });
+    const deleteBookmark = vi.fn().mockResolvedValue({ status: "deleted" });
+
+    installPapercaseApi({
+      listBooks: vi.fn().mockResolvedValue([makeBook()]),
+      listBookmarks,
+      deleteBookmark,
+    });
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Quiet Systems" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show bookmarks" }),
+    );
+
+    expect(await screen.findByText("Page 4 of 12")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Delete bookmark Page 4 of 12",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("Page 4 of 12")).not.toBeInTheDocument();
+    });
+    expect(deleteBookmark).toHaveBeenCalledWith({
+      bookId: "book-1",
+      bookmarkId: "bookmark-1",
+    });
+    expect(screen.getByText("No bookmarks yet.")).toBeInTheDocument();
   });
 
   it("routes EPUB books to the EPUB reader", async () => {
@@ -464,6 +505,17 @@ function installPapercaseApi({
       updatedAt: "2026-06-14T00:00:00.000Z",
     },
   }),
+  listBookmarks = vi.fn().mockResolvedValue({
+    status: "loaded",
+    bookmarks: [],
+  }),
+  createBookmark = vi.fn().mockResolvedValue({
+    status: "failed",
+    message: "The bookmark could not be saved.",
+  }),
+  deleteBookmark = vi.fn().mockResolvedValue({
+    status: "not-found",
+  }),
 }: {
   listBooks: PapercaseApi["library"]["listBooks"];
   getSettings?: PapercaseApi["settings"]["getSettings"];
@@ -474,6 +526,9 @@ function installPapercaseApi({
   loadPdf?: PapercaseApi["reader"]["loadPdf"];
   loadEpub?: PapercaseApi["reader"]["loadEpub"];
   saveProgress?: PapercaseApi["reader"]["saveProgress"];
+  listBookmarks?: PapercaseApi["bookmarks"]["listBookmarks"];
+  createBookmark?: PapercaseApi["bookmarks"]["createBookmark"];
+  deleteBookmark?: PapercaseApi["bookmarks"]["deleteBookmark"];
 }): void {
   const api: PapercaseApi = {
     app: {
@@ -494,12 +549,38 @@ function installPapercaseApi({
       loadEpub,
       saveProgress,
     },
+    bookmarks: {
+      listBookmarks,
+      createBookmark,
+      deleteBookmark,
+    },
   };
 
   Object.defineProperty(window, "papercase", {
     configurable: true,
     value: api,
   });
+}
+
+function makeBookmark(
+  overrides: Partial<Extract<BookmarkSummary, { format: "pdf" }>> = {},
+): BookmarkSummary {
+  return {
+    id: "bookmark-1",
+    bookId: "book-1",
+    format: "pdf",
+    label: "Page 4 of 12",
+    location: {
+      pageNumber: 4,
+      pageCount: 12,
+      viewMode: "single",
+      zoom: 1,
+      zoomMode: "auto",
+    },
+    createdAt: "2026-06-14T00:00:00.000Z",
+    updatedAt: "2026-06-14T00:00:00.000Z",
+    ...overrides,
+  };
 }
 
 function makeBook(

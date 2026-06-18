@@ -28,6 +28,15 @@ export type ReadingProgressRecord = ReadingProgressSummary & {
   location: unknown;
 };
 
+export type BookmarkRecord = {
+  id: string;
+  bookId: string;
+  location: unknown;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type BookRecordWithProgress = BookRecord & {
   progress: ReadingProgressSummary | null;
 };
@@ -49,6 +58,13 @@ export type SaveReadingProgressRecordInput = {
   location: unknown;
   label: string | null;
   progressFraction: number | null;
+};
+
+export type CreateBookmarkRecordInput = {
+  id?: string;
+  bookId: string;
+  location: unknown;
+  label: string | null;
 };
 
 type BookRow = {
@@ -77,6 +93,15 @@ type ReadingProgressRow = {
   location_json: string;
   label: string | null;
   progress_fraction: number | null;
+  updated_at: string;
+};
+
+type BookmarkRow = {
+  id: string;
+  book_id: string;
+  location_json: string;
+  label: string | null;
+  created_at: string;
   updated_at: string;
 };
 
@@ -250,6 +275,68 @@ export class BooksRepository {
       updatedAt: now,
     };
   }
+
+  listBookmarksByBookId(bookId: string): BookmarkRecord[] {
+    return this.database
+      .prepare(
+        `
+          SELECT *
+          FROM bookmarks
+          WHERE book_id = ?
+          ORDER BY created_at DESC, id ASC
+        `,
+      )
+      .all(bookId)
+      .map((row) => rowToBookmarkRecord(row as BookmarkRow));
+  }
+
+  createBookmark(input: CreateBookmarkRecordInput): BookmarkRecord {
+    const now = new Date().toISOString();
+    const record: BookmarkRecord = {
+      id: input.id ?? randomUUID(),
+      bookId: input.bookId,
+      location: input.location,
+      label:
+        input.label && input.label.trim().length > 0
+          ? input.label.trim()
+          : null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.database
+      .prepare(
+        `
+          INSERT INTO bookmarks (
+            id,
+            book_id,
+            location_json,
+            label,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        record.id,
+        record.bookId,
+        JSON.stringify(record.location),
+        record.label,
+        record.createdAt,
+        record.updatedAt,
+      );
+
+    return record;
+  }
+
+  deleteBookmark(bookId: string, bookmarkId: string): boolean {
+    const result = this.database
+      .prepare("DELETE FROM bookmarks WHERE book_id = ? AND id = ?")
+      .run(bookId, bookmarkId);
+
+    return Number(result.changes) > 0;
+  }
 }
 
 function rowToBookRecord(row: BookRow): BookRecord {
@@ -293,6 +380,17 @@ function rowToReadingProgressRecord(
     location: JSON.parse(row.location_json) as unknown,
     label: row.label,
     progressFraction: row.progress_fraction,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToBookmarkRecord(row: BookmarkRow): BookmarkRecord {
+  return {
+    id: row.id,
+    bookId: row.book_id,
+    location: JSON.parse(row.location_json) as unknown,
+    label: row.label,
+    createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }

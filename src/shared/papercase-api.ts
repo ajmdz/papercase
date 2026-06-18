@@ -47,6 +47,28 @@ export type EpubReaderLocation = {
   viewMode: EpubPageViewMode;
 };
 
+export type PdfBookmark = {
+  id: string;
+  bookId: string;
+  format: "pdf";
+  location: PdfReaderLocation;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EpubBookmark = {
+  id: string;
+  bookId: string;
+  format: "epub";
+  location: EpubReaderLocation;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BookmarkSummary = PdfBookmark | EpubBookmark;
+
 export type LibraryOpenResult =
   | {
       status: "ready";
@@ -189,6 +211,61 @@ export type SaveReadingProgressResult =
       message: string;
     };
 
+export type CreatePdfBookmarkInput = {
+  bookId: string;
+  format: "pdf";
+  location: PdfReaderLocation;
+  label: string | null;
+};
+
+export type CreateEpubBookmarkInput = {
+  bookId: string;
+  format: "epub";
+  location: EpubReaderLocation;
+  label: string | null;
+};
+
+export type CreateBookmarkInput =
+  | CreatePdfBookmarkInput
+  | CreateEpubBookmarkInput;
+
+export type DeleteBookmarkInput = {
+  bookId: string;
+  bookmarkId: string;
+};
+
+export type ListBookmarksResult =
+  | {
+      status: "loaded";
+      bookmarks: BookmarkSummary[];
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
+export type CreateBookmarkResult =
+  | {
+      status: "created";
+      bookmark: BookmarkSummary;
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
+export type DeleteBookmarkResult =
+  | {
+      status: "deleted";
+    }
+  | {
+      status: "not-found";
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
 export type PapercaseApi = {
   app: {
     getVersion: () => Promise<string>;
@@ -211,5 +288,14 @@ export type PapercaseApi = {
     saveProgress: (
       input: SaveReadingProgressInput,
     ) => Promise<SaveReadingProgressResult>;
+  };
+  bookmarks: {
+    listBookmarks: (bookId: string) => Promise<ListBookmarksResult>;
+    createBookmark: (
+      input: CreateBookmarkInput,
+    ) => Promise<CreateBookmarkResult>;
+    deleteBookmark: (
+      input: DeleteBookmarkInput,
+    ) => Promise<DeleteBookmarkResult>;
   };
 };

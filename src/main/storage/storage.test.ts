@@ -321,6 +321,86 @@ describe("BooksRepository", () => {
       storage.database.close();
     }
   });
+
+  it("creates, lists, and deletes bookmarks without touching other reading data", () => {
+    const storage = initializeLocalStorage(makeUserDataDir());
+    const repository = new BooksRepository(storage.database);
+
+    try {
+      repository.create({
+        id: "book-1",
+        format: "pdf",
+        title: "Quiet Systems",
+        fileHash: "sha256:mno345",
+        storagePath: join(storage.paths.booksDir, "book-1", "source.pdf"),
+        originalFileName: "quiet-systems.pdf",
+        fileSize: 2048,
+      });
+      const progress = repository.saveProgress({
+        bookId: "book-1",
+        format: "pdf",
+        location: {
+          pageNumber: 4,
+          pageCount: 12,
+          viewMode: "single",
+          zoom: 1,
+          zoomMode: "auto",
+        },
+        label: "Page 4 of 12",
+        progressFraction: 0.33,
+      });
+      const now = new Date().toISOString();
+
+      storage.database
+        .prepare(
+          `
+            INSERT INTO highlights (
+              id,
+              book_id,
+              color,
+              selected_text,
+              location_json,
+              note,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          "highlight-1",
+          "book-1",
+          "yellow",
+          "marked text",
+          JSON.stringify({ pageNumber: 4 }),
+          null,
+          now,
+          now,
+        );
+
+      const bookmark = repository.createBookmark({
+        id: "bookmark-1",
+        bookId: "book-1",
+        location: {
+          pageNumber: 4,
+          pageCount: 12,
+          viewMode: "single",
+          zoom: 1,
+          zoomMode: "auto",
+        },
+        label: "Page 4 of 12",
+      });
+
+      expect(repository.listBookmarksByBookId("book-1")).toEqual([bookmark]);
+      expect(repository.deleteBookmark("book-1", "bookmark-1")).toBe(true);
+      expect(repository.listBookmarksByBookId("book-1")).toEqual([]);
+      expect(repository.findProgressByBookId("book-1")).toEqual(progress);
+      expect(countRows(storage.database, "highlights")).toBe(1);
+      expect(repository.deleteBookmark("book-1", "bookmark-1")).toBe(false);
+    } finally {
+      storage.database.close();
+    }
+  });
 });
 
 describe("SettingsRepository", () => {
@@ -349,4 +429,15 @@ function makeUserDataDir(): string {
   const tempDir = mkdtempSync(join(tmpdir(), "papercase-storage-"));
   tempDirs.push(tempDir);
   return tempDir;
+}
+
+function countRows(
+  database: ReturnType<typeof initializeLocalStorage>["database"],
+  tableName: string,
+): number {
+  const row = database
+    .prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
+    .get() as CountRow;
+
+  return row.count;
 }

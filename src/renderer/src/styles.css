@@ -776,6 +776,7 @@ h2 {
 }
 
 .reader-back-button svg,
+.reader-bookmark-button svg,
 .reader-options-button svg {
   width: 1.05rem;
   height: 1.05rem;
@@ -834,6 +835,36 @@ h2 {
   position: relative;
   display: inline-flex;
   -webkit-app-region: no-drag;
+}
+
+.reader-bookmark-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  min-width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-muted);
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.reader-bookmark-button:hover,
+.reader-bookmark-button:focus-visible,
+.reader-bookmark-button.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-soft) 72%, transparent);
+}
+
+.reader-bookmark-button:disabled {
+  color: var(--ink-soft);
+  opacity: 0.48;
 }
 
 .reader-options-button {
@@ -1144,6 +1175,90 @@ h2 {
 .reader-toc-current:focus-visible {
   color: var(--ink);
   border-color: var(--line);
+}
+
+.reader-bookmark-list {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.reader-bookmark-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2rem;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.reader-bookmark-jump {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 2.25rem;
+  min-width: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 999px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 680;
+  text-align: left;
+  cursor: default;
+}
+
+.reader-bookmark-jump:hover,
+.reader-bookmark-jump:focus-visible {
+  background: var(--surface-soft);
+}
+
+.reader-bookmark-jump span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-bookmark-jump span:last-child {
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 640;
+  white-space: nowrap;
+}
+
+.reader-bookmark-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: transparent;
+  cursor: default;
+}
+
+.reader-bookmark-delete svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.reader-bookmark-delete:hover,
+.reader-bookmark-delete:focus-visible {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger-soft) 70%, transparent);
+}
+
+.reader-bookmark-delete:disabled {
+  opacity: 0.48;
+}
+
+.reader-panel-section .reader-panel-error {
+  color: var(--danger);
+  white-space: normal;
 }
 
 .reader-stage {

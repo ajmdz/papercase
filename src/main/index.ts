@@ -22,21 +22,29 @@ import {
 } from "./library/remove-service";
 import {
   BooksRepository,
+  type BookmarkRecord,
   type BookRecord,
   type ReadingProgressRecord,
   type ReadingProgressSummary,
 } from "./storage/books-repository";
+import type { BookFormat } from "./storage/paths";
 import { initializeLocalStorage, type LocalStorage } from "./storage/database";
 import { SettingsRepository } from "./storage/settings-repository";
 import type {
   AppSettings,
   AppTheme,
+  BookmarkSummary,
+  CreateBookmarkInput,
+  CreateBookmarkResult,
+  DeleteBookmarkInput,
+  DeleteBookmarkResult,
   EpubDocumentLoadResult,
   EpubReaderLocation,
   LibraryBookSummary,
   LibraryImportResult,
   LibraryOpenResult,
   LibraryRemoveResult,
+  ListBookmarksResult,
   PdfDocumentLoadResult,
   PdfReaderLocation,
   ReaderLocation,
@@ -443,6 +451,113 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle(
+  "bookmarks:listBookmarks",
+  (_event, bookId: unknown): ListBookmarksResult => {
+    if (typeof bookId !== "string" || bookId.trim().length === 0) {
+      return {
+        status: "failed",
+        message: "Bookmarks could not be loaded.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(bookId);
+
+      if (!book) {
+        return {
+          status: "failed",
+          message: "Bookmarks could not be loaded.",
+        };
+      }
+
+      return {
+        status: "loaded",
+        bookmarks: repository
+          .listBookmarksByBookId(book.id)
+          .map((bookmark) => bookmarkRecordToSummary(bookmark, book.format)),
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "Bookmarks could not be loaded.",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "bookmarks:createBookmark",
+  (_event, input: unknown): CreateBookmarkResult => {
+    const bookmarkInput = parseCreateBookmarkInput(input);
+
+    if (!bookmarkInput) {
+      return {
+        status: "failed",
+        message: "The bookmark could not be saved.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(bookmarkInput.bookId);
+
+      if (!book || book.format !== bookmarkInput.format) {
+        return {
+          status: "failed",
+          message: "The bookmark could not be saved.",
+        };
+      }
+
+      const bookmark = repository.createBookmark({
+        bookId: bookmarkInput.bookId,
+        location: bookmarkInput.location,
+        label: bookmarkInput.label,
+      });
+
+      return {
+        status: "created",
+        bookmark: bookmarkRecordToSummary(bookmark, book.format),
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "The bookmark could not be saved.",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "bookmarks:deleteBookmark",
+  (_event, input: unknown): DeleteBookmarkResult => {
+    const deleteInput = parseDeleteBookmarkInput(input);
+
+    if (!deleteInput) {
+      return {
+        status: "failed",
+        message: "The bookmark could not be deleted.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const deleted = repository.deleteBookmark(
+        deleteInput.bookId,
+        deleteInput.bookmarkId,
+      );
+
+      return deleted ? { status: "deleted" } : { status: "not-found" };
+    } catch {
+      return {
+        status: "failed",
+        message: "The bookmark could not be deleted.",
+      };
+    }
+  },
+);
+
 function getStorage(): LocalStorage {
   if (!storage) {
     throw new Error("Papercase storage has not been initialized.");
@@ -483,6 +598,45 @@ function progressRecordToReaderLocation(
     format: progress.format,
     location: progress.location,
     label: progress.label ?? undefined,
+  };
+}
+
+function bookmarkRecordToSummary(
+  bookmark: BookmarkRecord,
+  format: BookFormat,
+): BookmarkSummary {
+  const base = {
+    id: bookmark.id,
+    bookId: bookmark.bookId,
+    label: bookmark.label,
+    createdAt: bookmark.createdAt,
+    updatedAt: bookmark.updatedAt,
+  };
+
+  if (format === "pdf") {
+    const location = parsePdfReaderLocation(bookmark.location);
+
+    if (!location) {
+      throw new Error("Stored PDF bookmark location is invalid.");
+    }
+
+    return {
+      ...base,
+      format: "pdf",
+      location,
+    };
+  }
+
+  const location = parseEpubReaderLocation(bookmark.location);
+
+  if (!location) {
+    throw new Error("Stored EPUB bookmark location is invalid.");
+  }
+
+  return {
+    ...base,
+    format: "epub",
+    location,
   };
 }
 
@@ -551,6 +705,65 @@ function parseSaveReadingProgressInput(
         progressFraction: input.progressFraction,
       }
     : null;
+}
+
+function parseCreateBookmarkInput(input: unknown): CreateBookmarkInput | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  if (
+    typeof input.bookId !== "string" ||
+    input.bookId.trim().length === 0 ||
+    (input.format !== "pdf" && input.format !== "epub") ||
+    !isNullableString(input.label)
+  ) {
+    return null;
+  }
+
+  if (input.format === "pdf") {
+    const location = parsePdfReaderLocation(input.location);
+
+    return location
+      ? {
+          bookId: input.bookId,
+          format: "pdf",
+          location,
+          label: input.label,
+        }
+      : null;
+  }
+
+  const location = parseEpubReaderLocation(input.location);
+
+  return location
+    ? {
+        bookId: input.bookId,
+        format: "epub",
+        location,
+        label: input.label,
+      }
+    : null;
+}
+
+function parseDeleteBookmarkInput(input: unknown): DeleteBookmarkInput | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  if (
+    typeof input.bookId !== "string" ||
+    input.bookId.trim().length === 0 ||
+    typeof input.bookmarkId !== "string" ||
+    input.bookmarkId.trim().length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    bookId: input.bookId,
+    bookmarkId: input.bookmarkId,
+  };
 }
 
 function parseEpubReaderLocation(input: unknown): EpubReaderLocation | null {

@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  CreateBookmarkInput,
+  DeleteBookmarkInput,
   PapercaseApi,
   SaveReadingProgressInput,
   SettingsUpdateInput,
@@ -28,6 +30,14 @@ const api: PapercaseApi = Object.freeze({
     loadEpub: (bookId: string) => ipcRenderer.invoke("reader:loadEpub", bookId),
     saveProgress: (input: SaveReadingProgressInput) =>
       ipcRenderer.invoke("reader:saveProgress", input),
+  }),
+  bookmarks: Object.freeze({
+    listBookmarks: (bookId: string) =>
+      ipcRenderer.invoke("bookmarks:listBookmarks", bookId),
+    createBookmark: (input: CreateBookmarkInput) =>
+      ipcRenderer.invoke("bookmarks:createBookmark", input),
+    deleteBookmark: (input: DeleteBookmarkInput) =>
+      ipcRenderer.invoke("bookmarks:deleteBookmark", input),
   }),
 });
 
