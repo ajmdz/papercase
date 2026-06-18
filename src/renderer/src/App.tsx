@@ -2,9 +2,13 @@ import type { ReactElement, RefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AppTheme,
+  BookmarkSummary,
+  CreateBookmarkInput,
+  EpubReaderLocation,
   LibraryBookSummary,
   LibraryImportResult,
   LibraryRemoveResult,
+  PdfReaderLocation,
   ReaderLocation,
 } from "../../shared/papercase-api";
 import {
@@ -525,12 +529,29 @@ function ReaderShell({
   const [readerContents, setReaderContents] = useState<ReaderContentsItem[]>(
     [],
   );
+  const [bookmarks, setBookmarks] = useState<BookmarkSummary[]>([]);
+  const [bookmarkErrorMessage, setBookmarkErrorMessage] = useState<
+    string | null
+  >(null);
+  const [isBookmarkingLocation, setIsBookmarkingLocation] = useState(false);
+  const [deletingBookmarkId, setDeletingBookmarkId] = useState<string | null>(
+    null,
+  );
   const [epubFontSizePercent, setEpubFontSizePercent] =
     useState(defaultEpubFontSize);
   const pageNavigationRef = useRef<
     ((target: ReaderNavigationTarget) => void) | null
   >(null);
   const locationLabel = readerLocationLabel(view, readerLocation);
+  const currentBookmarkKey = bookmarkLocationKey(readerLocation);
+  const currentBookmark =
+    currentBookmarkKey === null
+      ? null
+      : (bookmarks.find(
+          (bookmark) => bookmarkSummaryKey(bookmark) === currentBookmarkKey,
+        ) ?? null);
+  const canBookmarkCurrentLocation =
+    view.status === "ready" && currentBookmarkKey !== null;
 
   const handleReaderLocationChange = useCallback((location: ReaderLocation) => {
     setReaderLocation(location);
@@ -545,6 +566,45 @@ function ReaderShell({
   const handleEpubFontSizeChange = useCallback((fontSizePercent: number) => {
     setEpubFontSizePercent(clampEpubFontSize(fontSizePercent));
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const api = window.papercase?.bookmarks;
+
+    if (view.status !== "ready") {
+      return;
+    }
+
+    if (!api) {
+      return;
+    }
+
+    api
+      .listBookmarks(view.book.id)
+      .then((result) => {
+        if (!isMounted) {
+          return;
+        }
+
+        if (result.status === "failed") {
+          setBookmarkErrorMessage(result.message);
+          setBookmarks([]);
+          return;
+        }
+
+        setBookmarks(result.bookmarks);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setBookmarkErrorMessage("Bookmarks could not be loaded.");
+          setBookmarks([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [view.book.id, view.status]);
 
   useEffect(() => {
     if (!activeReaderPanel) {
@@ -607,6 +667,108 @@ function ReaderShell({
     setActiveReaderPanel(null);
   }
 
+  async function handleBookmarkCurrentLocation(): Promise<void> {
+    const api = window.papercase?.bookmarks;
+    const input = createBookmarkInputFromReaderLocation(readerLocation);
+
+    if (!api || !input || isBookmarkingLocation) {
+      return;
+    }
+
+    setBookmarkErrorMessage(null);
+    setIsBookmarkingLocation(true);
+
+    try {
+      if (currentBookmark) {
+        const didDelete = await deleteBookmark(api, currentBookmark.id);
+
+        if (didDelete) {
+          setBookmarks((currentBookmarks) =>
+            currentBookmarks.filter(
+              (bookmark) => bookmark.id !== currentBookmark.id,
+            ),
+          );
+        }
+
+        return;
+      }
+
+      const result = await api.createBookmark(input);
+
+      if (result.status === "failed") {
+        setBookmarkErrorMessage(result.message);
+        setActiveReaderPanel("bookmarks");
+        return;
+      }
+
+      const nextBookmarkKey = bookmarkSummaryKey(result.bookmark);
+
+      setBookmarks((currentBookmarks) => [
+        result.bookmark,
+        ...currentBookmarks.filter(
+          (bookmark) => bookmarkSummaryKey(bookmark) !== nextBookmarkKey,
+        ),
+      ]);
+    } catch {
+      setBookmarkErrorMessage("The bookmark could not be saved.");
+      setActiveReaderPanel("bookmarks");
+    } finally {
+      setIsBookmarkingLocation(false);
+    }
+  }
+
+  async function handleBookmarkDelete(bookmarkId: string): Promise<void> {
+    const api = window.papercase?.bookmarks;
+
+    if (!api || deletingBookmarkId) {
+      return;
+    }
+
+    setBookmarkErrorMessage(null);
+    setDeletingBookmarkId(bookmarkId);
+
+    try {
+      const didDelete = await deleteBookmark(api, bookmarkId);
+
+      if (didDelete) {
+        setBookmarks((currentBookmarks) =>
+          currentBookmarks.filter((bookmark) => bookmark.id !== bookmarkId),
+        );
+      }
+    } finally {
+      setDeletingBookmarkId(null);
+    }
+  }
+
+  async function deleteBookmark(
+    api: NonNullable<typeof window.papercase>["bookmarks"],
+    bookmarkId: string,
+  ): Promise<boolean> {
+    try {
+      const result = await api.deleteBookmark({
+        bookId: view.book.id,
+        bookmarkId,
+      });
+
+      if (result.status === "failed") {
+        setBookmarkErrorMessage(result.message);
+        setActiveReaderPanel("bookmarks");
+        return false;
+      }
+
+      return true;
+    } catch {
+      setBookmarkErrorMessage("The bookmark could not be deleted.");
+      setActiveReaderPanel("bookmarks");
+      return false;
+    }
+  }
+
+  function handleBookmarkSelect(bookmark: BookmarkSummary): void {
+    pageNavigationRef.current?.(bookmarkNavigationTarget(bookmark));
+    setActiveReaderPanel(null);
+  }
+
   function changeEpubFontSize(delta: number): void {
     setEpubFontSizePercent((currentFontSize) =>
       clampEpubFontSize(currentFontSize + delta),
@@ -648,6 +810,23 @@ function ReaderShell({
             {view.book.format === "pdf" ? (
               <p className="reader-location">{locationLabel}</p>
             ) : null}
+            <button
+              aria-label={
+                currentBookmark
+                  ? "Remove bookmark at current location"
+                  : "Add bookmark at current location"
+              }
+              aria-pressed={Boolean(currentBookmark)}
+              className={`reader-bookmark-button${
+                currentBookmark ? " is-active" : ""
+              }`}
+              disabled={!canBookmarkCurrentLocation || isBookmarkingLocation}
+              title={currentBookmark ? "Remove bookmark" : "Add bookmark"}
+              type="button"
+              onClick={handleBookmarkCurrentLocation}
+            >
+              <BookmarkPageIcon filled={Boolean(currentBookmark)} />
+            </button>
             <ReaderOptionsMenu
               epubFontSizeControls={epubFontSizeControls}
               isOpen={isOptionsOpen}
@@ -678,9 +857,14 @@ function ReaderShell({
           >
             <ReaderPanelContent
               activePanel={activeReaderPanel}
+              bookmarkErrorMessage={bookmarkErrorMessage}
+              bookmarks={bookmarks}
               contents={readerContents}
+              deletingBookmarkId={deletingBookmarkId}
               locationLabel={locationLabel}
               onClose={() => setActiveReaderPanel(null)}
+              onDeleteBookmark={handleBookmarkDelete}
+              onSelectBookmark={handleBookmarkSelect}
               onSelectContent={handleReaderContentSelect}
             />
           </aside>
@@ -769,15 +953,25 @@ function FloatingReaderControls({
 
 function ReaderPanelContent({
   activePanel,
+  bookmarkErrorMessage,
+  bookmarks,
   contents,
+  deletingBookmarkId,
   locationLabel,
   onClose,
+  onDeleteBookmark,
+  onSelectBookmark,
   onSelectContent,
 }: {
   activePanel: ReaderPanel;
+  bookmarkErrorMessage: string | null;
+  bookmarks: BookmarkSummary[];
   contents: ReaderContentsItem[];
+  deletingBookmarkId: string | null;
   locationLabel: string;
   onClose: () => void;
+  onDeleteBookmark: (bookmarkId: string) => void;
+  onSelectBookmark: (bookmark: BookmarkSummary) => void;
   onSelectContent: (item: ReaderContentsItem) => void;
 }): ReactElement {
   if (activePanel === "contents") {
@@ -813,7 +1007,40 @@ function ReaderPanelContent({
     return (
       <section className="reader-panel-section">
         <h2>Bookmarks</h2>
-        <p>No bookmarks yet.</p>
+        {bookmarkErrorMessage ? (
+          <p className="reader-panel-error" role="alert">
+            {bookmarkErrorMessage}
+          </p>
+        ) : null}
+        {bookmarks.length === 0 ? <p>No bookmarks yet.</p> : null}
+        {bookmarks.length > 0 ? (
+          <div className="reader-bookmark-list">
+            {bookmarks.map((bookmark) => (
+              <div className="reader-bookmark-row" key={bookmark.id}>
+                <button
+                  className="reader-bookmark-jump"
+                  type="button"
+                  onClick={() => onSelectBookmark(bookmark)}
+                >
+                  <span>{bookmarkDisplayLabel(bookmark)}</span>
+                  <span>{formatBookmarkDate(bookmark.createdAt)}</span>
+                </button>
+                <button
+                  aria-label={`Delete bookmark ${bookmarkDisplayLabel(
+                    bookmark,
+                  )}`}
+                  className="reader-bookmark-delete"
+                  disabled={deletingBookmarkId === bookmark.id}
+                  title="Delete bookmark"
+                  type="button"
+                  onClick={() => onDeleteBookmark(bookmark.id)}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -975,15 +1202,34 @@ function ListIcon(): ReactElement {
   );
 }
 
-function BookmarkPageIcon(): ReactElement {
+function BookmarkPageIcon({
+  filled = false,
+}: {
+  filled?: boolean;
+}): ReactElement {
   return (
     <svg aria-hidden="true" viewBox="0 0 20 20">
       <path
         d="M6 3.2h8a1 1 0 0 1 1 1v12.1l-5-2.8-5 2.8V4.2a1 1 0 0 1 1-1Z"
-        fill="none"
+        fill={filled ? "currentColor" : "none"}
         stroke="currentColor"
         strokeLinejoin="round"
         strokeWidth="1.7"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path
+        d="M4.8 6.1h10.4M8.1 6.1V4.4h3.8v1.7M7 8.4v5.3M10 8.4v5.3M13 8.4v5.3M6.2 6.1l.5 10h6.6l.5-10"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.55"
       />
     </svg>
   );
@@ -1301,6 +1547,151 @@ function readerLocationLabel(
   }
 
   return location.label ?? "Start";
+}
+
+function createBookmarkInputFromReaderLocation(
+  readerLocation: ReaderLocation,
+): CreateBookmarkInput | null {
+  const label = readerLocation.label?.trim() || null;
+
+  if (
+    readerLocation.format === "pdf" &&
+    isPdfReaderLocation(readerLocation.location)
+  ) {
+    return {
+      bookId: readerLocation.bookId,
+      format: "pdf",
+      location: readerLocation.location,
+      label,
+    };
+  }
+
+  if (
+    readerLocation.format === "epub" &&
+    isEpubReaderLocation(readerLocation.location)
+  ) {
+    return {
+      bookId: readerLocation.bookId,
+      format: "epub",
+      location: readerLocation.location,
+      label,
+    };
+  }
+
+  return null;
+}
+
+function bookmarkLocationKey(readerLocation: ReaderLocation): string | null {
+  if (
+    readerLocation.format === "pdf" &&
+    isPdfReaderLocation(readerLocation.location)
+  ) {
+    return `pdf:${readerLocation.location.pageNumber}`;
+  }
+
+  if (
+    readerLocation.format === "epub" &&
+    isEpubReaderLocation(readerLocation.location)
+  ) {
+    return `epub:${readerLocation.location.cfi}`;
+  }
+
+  return null;
+}
+
+function bookmarkSummaryKey(bookmark: BookmarkSummary): string {
+  return bookmark.format === "pdf"
+    ? `pdf:${bookmark.location.pageNumber}`
+    : `epub:${bookmark.location.cfi}`;
+}
+
+function bookmarkNavigationTarget(
+  bookmark: BookmarkSummary,
+): ReaderNavigationTarget {
+  return bookmark.format === "pdf"
+    ? bookmark.location.pageNumber
+    : bookmark.location.cfi;
+}
+
+function bookmarkDisplayLabel(bookmark: BookmarkSummary): string {
+  if (bookmark.label && bookmark.label.trim().length > 0) {
+    return bookmark.label;
+  }
+
+  if (bookmark.format === "pdf") {
+    return `Page ${bookmark.location.pageNumber}`;
+  }
+
+  return bookmark.location.chapterTitle ?? "EPUB bookmark";
+}
+
+function formatBookmarkDate(createdAt: string): string {
+  const date = new Date(createdAt);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Saved";
+  }
+
+  return date.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function isPdfReaderLocation(location: unknown): location is PdfReaderLocation {
+  if (!isObject(location)) {
+    return false;
+  }
+
+  return (
+    typeof location.pageNumber === "number" &&
+    Number.isInteger(location.pageNumber) &&
+    location.pageNumber > 0 &&
+    typeof location.pageCount === "number" &&
+    Number.isInteger(location.pageCount) &&
+    location.pageCount >= location.pageNumber &&
+    (location.viewMode === "single" || location.viewMode === "two-page") &&
+    typeof location.zoom === "number" &&
+    Number.isFinite(location.zoom) &&
+    (location.zoomMode === "auto" ||
+      location.zoomMode === "actual" ||
+      location.zoomMode === "custom")
+  );
+}
+
+function isEpubReaderLocation(
+  location: unknown,
+): location is EpubReaderLocation {
+  if (!isObject(location)) {
+    return false;
+  }
+
+  return (
+    typeof location.cfi === "string" &&
+    location.cfi.trim().length > 0 &&
+    isNullableString(location.href) &&
+    isNullableString(location.chapterTitle) &&
+    isNullablePositiveInteger(location.displayedPage) &&
+    isNullablePositiveInteger(location.displayedTotal) &&
+    typeof location.fontSizePercent === "number" &&
+    Number.isFinite(location.fontSizePercent) &&
+    (location.viewMode === "single" || location.viewMode === "two-page")
+  );
+}
+
+function isNullablePositiveInteger(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (typeof value === "number" && Number.isInteger(value) && value > 0)
+  );
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function clampEpubFontSize(fontSizePercent: number): number {
