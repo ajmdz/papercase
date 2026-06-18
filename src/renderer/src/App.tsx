@@ -7,7 +7,18 @@ import type {
   LibraryRemoveResult,
   ReaderLocation,
 } from "../../shared/papercase-api";
-import { PdfReader, type ReaderContentsItem } from "./pdf-reader";
+import {
+  defaultEpubFontSize,
+  epubFontSizeStep,
+  EpubReader,
+  maxEpubFontSize,
+  minEpubFontSize,
+} from "./epub-reader";
+import { PdfReader } from "./pdf-reader";
+import type {
+  ReaderContentsItem,
+  ReaderNavigationTarget,
+} from "./reader-types";
 
 type Notice = {
   tone: "success" | "info" | "error";
@@ -22,6 +33,14 @@ type ReaderStatus =
   | "failed";
 
 type ReaderPanel = "contents" | "bookmarks" | "highlights";
+
+type EpubFontSizeControls = {
+  canDecrease: boolean;
+  canIncrease: boolean;
+  fontSizePercent: number;
+  onDecrease: () => void;
+  onIncrease: () => void;
+};
 
 type ViewState =
   | {
@@ -506,7 +525,11 @@ function ReaderShell({
   const [readerContents, setReaderContents] = useState<ReaderContentsItem[]>(
     [],
   );
-  const pageNavigationRef = useRef<((pageNumber: number) => void) | null>(null);
+  const [epubFontSizePercent, setEpubFontSizePercent] =
+    useState(defaultEpubFontSize);
+  const pageNavigationRef = useRef<
+    ((target: ReaderNavigationTarget) => void) | null
+  >(null);
   const locationLabel = readerLocationLabel(view, readerLocation);
 
   const handleReaderLocationChange = useCallback((location: ReaderLocation) => {
@@ -519,14 +542,18 @@ function ReaderShell({
     },
     [],
   );
+  const handleEpubFontSizeChange = useCallback((fontSizePercent: number) => {
+    setEpubFontSizePercent(clampEpubFontSize(fontSizePercent));
+  }, []);
 
   useEffect(() => {
     if (!activeReaderPanel) {
       return;
     }
 
-    function handlePointerDown(event: PointerEvent): void {
+    function handlePointerDown(event: Event): void {
       if (!(event.target instanceof Node)) {
+        setActiveReaderPanel(null);
         return;
       }
 
@@ -548,10 +575,15 @@ function ReaderShell({
 
     window.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("papercase:reader-interaction", handlePointerDown);
 
     return () => {
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener(
+        "papercase:reader-interaction",
+        handlePointerDown,
+      );
     };
   }, [activeReaderPanel]);
 
@@ -567,13 +599,30 @@ function ReaderShell({
   }
 
   function handleReaderContentSelect(item: ReaderContentsItem): void {
-    if (item.pageNumber === null) {
+    if (item.target === null) {
       return;
     }
 
-    pageNavigationRef.current?.(item.pageNumber);
+    pageNavigationRef.current?.(item.target);
     setActiveReaderPanel(null);
   }
+
+  function changeEpubFontSize(delta: number): void {
+    setEpubFontSizePercent((currentFontSize) =>
+      clampEpubFontSize(currentFontSize + delta),
+    );
+  }
+
+  const epubFontSizeControls: EpubFontSizeControls | null =
+    view.book.format === "epub"
+      ? {
+          canDecrease: epubFontSizePercent > minEpubFontSize,
+          canIncrease: epubFontSizePercent < maxEpubFontSize,
+          fontSizePercent: epubFontSizePercent,
+          onDecrease: () => changeEpubFontSize(-epubFontSizeStep),
+          onIncrease: () => changeEpubFontSize(epubFontSizeStep),
+        }
+      : null;
 
   return (
     <main className="reader-shell" aria-label="Reader">
@@ -596,8 +645,11 @@ function ReaderShell({
           </div>
 
           <div className="reader-toolbar-secondary">
-            <p className="reader-location">{locationLabel}</p>
+            {view.book.format === "pdf" ? (
+              <p className="reader-location">{locationLabel}</p>
+            ) : null}
             <ReaderOptionsMenu
+              epubFontSizeControls={epubFontSizeControls}
               isOpen={isOptionsOpen}
               theme={theme}
               onOpenChange={setIsOptionsOpen}
@@ -638,7 +690,10 @@ function ReaderShell({
           {view.status === "ready" ? (
             <ReaderStage
               book={view.book}
+              epubFontSizePercent={epubFontSizePercent}
+              theme={theme}
               onContentsChange={handleReaderContentsChange}
+              onEpubFontSizeChange={handleEpubFontSizeChange}
               onLocationChange={handleReaderLocationChange}
               pageNavigationRef={pageNavigationRef}
             />
@@ -734,15 +789,13 @@ function ReaderPanelContent({
             {contents.map((item) => (
               <button
                 className={`reader-toc-link level-${Math.min(item.level, 4)}`}
-                disabled={item.pageNumber === null}
+                disabled={item.target === null}
                 key={item.id}
                 type="button"
                 onClick={() => onSelectContent(item)}
               >
                 <span>{item.title}</span>
-                <span aria-hidden="true">
-                  {item.pageNumber === null ? "-" : item.pageNumber}
-                </span>
+                <span aria-hidden="true">{item.label ?? "-"}</span>
               </button>
             ))}
           </nav>
@@ -774,11 +827,13 @@ function ReaderPanelContent({
 }
 
 function ReaderOptionsMenu({
+  epubFontSizeControls,
   isOpen,
   theme,
   onOpenChange,
   onThemeChange,
 }: {
+  epubFontSizeControls: EpubFontSizeControls | null;
   isOpen: boolean;
   theme: AppTheme;
   onOpenChange: (isOpen: boolean) => void;
@@ -791,9 +846,9 @@ function ReaderOptionsMenu({
       return;
     }
 
-    function handlePointerDown(event: PointerEvent): void {
+    function handlePointerDown(event: Event): void {
       if (
-        event.target instanceof Node &&
+        !(event.target instanceof Node) ||
         !optionsRef.current?.contains(event.target)
       ) {
         onOpenChange(false);
@@ -808,10 +863,15 @@ function ReaderOptionsMenu({
 
     window.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("papercase:reader-interaction", handlePointerDown);
 
     return () => {
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener(
+        "papercase:reader-interaction",
+        handlePointerDown,
+      );
     };
   }, [isOpen, onOpenChange]);
 
@@ -858,6 +918,36 @@ function ReaderOptionsMenu({
               ))}
             </div>
           </div>
+          {epubFontSizeControls ? (
+            <div className="reader-options-section">
+              <p className="reader-options-heading">EPUB text</p>
+              <div className="reader-font-size-control">
+                <button
+                  aria-label="Decrease EPUB font size"
+                  className="reader-font-size-button"
+                  disabled={!epubFontSizeControls.canDecrease}
+                  role="menuitem"
+                  type="button"
+                  onClick={epubFontSizeControls.onDecrease}
+                >
+                  A-
+                </button>
+                <span className="reader-font-size-value">
+                  {epubFontSizeControls.fontSizePercent}%
+                </span>
+                <button
+                  aria-label="Increase EPUB font size"
+                  className="reader-font-size-button"
+                  disabled={!epubFontSizeControls.canIncrease}
+                  role="menuitem"
+                  type="button"
+                  onClick={epubFontSizeControls.onIncrease}
+                >
+                  A+
+                </button>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -958,14 +1048,22 @@ function GearIcon(): ReactElement {
 
 function ReaderStage({
   book,
+  epubFontSizePercent,
+  theme,
   onContentsChange,
+  onEpubFontSizeChange,
   onLocationChange,
   pageNavigationRef,
 }: {
   book: LibraryBookSummary;
+  epubFontSizePercent: number;
+  theme: AppTheme;
   onContentsChange: (contents: ReaderContentsItem[]) => void;
+  onEpubFontSizeChange: (fontSizePercent: number) => void;
   onLocationChange: (location: ReaderLocation) => void;
-  pageNavigationRef: RefObject<((pageNumber: number) => void) | null>;
+  pageNavigationRef: RefObject<
+    ((target: ReaderNavigationTarget) => void) | null
+  >;
 }): ReactElement {
   if (book.format === "pdf") {
     return (
@@ -986,14 +1084,19 @@ function ReaderStage({
 
   return (
     <section
-      className="reader-stage"
+      className="reader-stage reader-stage-epub"
       id="reader-start"
       aria-label="Reader area"
     >
-      <div className="reader-page" aria-hidden="true">
-        <span className="reader-page-format">{book.format.toUpperCase()}</span>
-        <span className="reader-page-title">{book.title}</span>
-      </div>
+      <EpubReader
+        book={book}
+        fontSizePercent={epubFontSizePercent}
+        theme={theme}
+        onContentsChange={onContentsChange}
+        onFontSizeChange={onEpubFontSizeChange}
+        onLocationChange={onLocationChange}
+        pageNavigationRef={pageNavigationRef}
+      />
     </section>
   );
 }
@@ -1198,6 +1301,13 @@ function readerLocationLabel(
   }
 
   return location.label ?? "Start";
+}
+
+function clampEpubFontSize(fontSizePercent: number): number {
+  return Math.min(
+    maxEpubFontSize,
+    Math.max(minEpubFontSize, Math.round(fontSizePercent)),
+  );
 }
 
 function readerPanelLabel(panel: ReaderPanel): string {

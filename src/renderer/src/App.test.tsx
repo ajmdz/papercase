@@ -189,6 +189,38 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("routes EPUB books to the EPUB reader", async () => {
+    const book = makeBook({
+      format: "epub",
+      originalFileName: "quiet-systems.epub",
+    });
+    const loadEpub = vi.fn().mockResolvedValue({
+      status: "failed",
+      message: "EPUB rendering is unavailable in this test.",
+    });
+    const loadPdf = vi.fn();
+
+    installPapercaseApi({
+      listBooks: vi.fn().mockResolvedValue([book]),
+      loadEpub,
+      loadPdf,
+    });
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Quiet Systems" }),
+    );
+
+    expect(
+      await screen.findByRole("main", { name: "Reader" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Unable to render EPUB",
+    );
+    expect(loadEpub).toHaveBeenCalledWith("book-1");
+    expect(loadPdf).not.toHaveBeenCalled();
+  });
+
   it("shows a reader error state when the local copy is missing", async () => {
     installPapercaseApi({
       listBooks: vi.fn().mockResolvedValue([makeBook()]),
@@ -420,6 +452,10 @@ function installPapercaseApi({
     status: "failed",
     message: "PDF rendering is unavailable in this test.",
   }),
+  loadEpub = vi.fn().mockResolvedValue({
+    status: "failed",
+    message: "EPUB rendering is unavailable in this test.",
+  }),
   saveProgress = vi.fn().mockResolvedValue({
     status: "saved",
     progress: {
@@ -436,6 +472,7 @@ function installPapercaseApi({
   removeBook?: PapercaseApi["library"]["removeBook"];
   updateSettings?: PapercaseApi["settings"]["updateSettings"];
   loadPdf?: PapercaseApi["reader"]["loadPdf"];
+  loadEpub?: PapercaseApi["reader"]["loadEpub"];
   saveProgress?: PapercaseApi["reader"]["saveProgress"];
 }): void {
   const api: PapercaseApi = {
@@ -454,6 +491,7 @@ function installPapercaseApi({
     },
     reader: {
       loadPdf,
+      loadEpub,
       saveProgress,
     },
   };
