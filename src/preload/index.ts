@@ -1,10 +1,13 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   CreateBookmarkInput,
+  CreateHighlightInput,
   DeleteBookmarkInput,
+  DeleteHighlightInput,
   PapercaseApi,
   SaveReadingProgressInput,
   SettingsUpdateInput,
+  UpdateHighlightInput,
 } from "../shared/papercase-api";
 
 // Keep the renderer contract narrow; filesystem work will stay in the main process.
@@ -38,6 +41,16 @@ const api: PapercaseApi = Object.freeze({
       ipcRenderer.invoke("bookmarks:createBookmark", input),
     deleteBookmark: (input: DeleteBookmarkInput) =>
       ipcRenderer.invoke("bookmarks:deleteBookmark", input),
+  }),
+  highlights: Object.freeze({
+    listHighlights: (bookId: string) =>
+      ipcRenderer.invoke("highlights:listHighlights", bookId),
+    createHighlight: (input: CreateHighlightInput) =>
+      ipcRenderer.invoke("highlights:createHighlight", input),
+    updateHighlight: (input: UpdateHighlightInput) =>
+      ipcRenderer.invoke("highlights:updateHighlight", input),
+    deleteHighlight: (input: DeleteHighlightInput) =>
+      ipcRenderer.invoke("highlights:deleteHighlight", input),
   }),
 });
 

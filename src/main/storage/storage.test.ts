@@ -401,6 +401,124 @@ describe("BooksRepository", () => {
       storage.database.close();
     }
   });
+
+  it("creates, updates, lists, and deletes highlights without touching other reading data", () => {
+    const storage = initializeLocalStorage(makeUserDataDir());
+    const repository = new BooksRepository(storage.database);
+
+    try {
+      repository.create({
+        id: "book-1",
+        format: "pdf",
+        title: "Quiet Systems",
+        fileHash: "sha256:pqr678",
+        storagePath: join(storage.paths.booksDir, "book-1", "source.pdf"),
+        originalFileName: "quiet-systems.pdf",
+        fileSize: 2048,
+      });
+      const progress = repository.saveProgress({
+        bookId: "book-1",
+        format: "pdf",
+        location: {
+          pageNumber: 6,
+          pageCount: 12,
+          viewMode: "single",
+          zoom: 1,
+          zoomMode: "auto",
+        },
+        label: "Page 6 of 12",
+        progressFraction: 0.5,
+      });
+      const bookmark = repository.createBookmark({
+        id: "bookmark-1",
+        bookId: "book-1",
+        location: {
+          pageNumber: 6,
+          pageCount: 12,
+          viewMode: "single",
+          zoom: 1,
+          zoomMode: "auto",
+        },
+        label: "Page 6 of 12",
+      });
+
+      const highlight = repository.createHighlight({
+        id: "highlight-1",
+        bookId: "book-1",
+        color: "yellow",
+        selectedText: "  marked text  ",
+        location: {
+          kind: "pdf-selection",
+          pageNumber: 6,
+          rects: [{ x: 18, y: 24, width: 140, height: 16 }],
+        },
+        note: "  first note  ",
+      });
+
+      expect(highlight).toMatchObject({
+        id: "highlight-1",
+        bookId: "book-1",
+        color: "yellow",
+        selectedText: "marked text",
+        location: {
+          kind: "pdf-selection",
+          pageNumber: 6,
+          rects: [{ x: 18, y: 24, width: 140, height: 16 }],
+        },
+        note: "first note",
+      });
+      expect(repository.listHighlightsByBookId("book-1")).toEqual([highlight]);
+
+      const updatedHighlight = repository.updateHighlight({
+        bookId: "book-1",
+        highlightId: "highlight-1",
+        color: "blue",
+        note: "  revised note  ",
+      });
+
+      expect(updatedHighlight).not.toBeNull();
+      if (!updatedHighlight) {
+        throw new Error("Expected highlight update to succeed.");
+      }
+      expect(updatedHighlight).toEqual({
+        ...highlight,
+        color: "blue",
+        note: "revised note",
+        updatedAt: updatedHighlight.updatedAt,
+      });
+      expect(repository.listHighlightsByBookId("book-1")).toEqual([
+        updatedHighlight,
+      ]);
+
+      const clearedNoteHighlight = repository.updateHighlight({
+        bookId: "book-1",
+        highlightId: "highlight-1",
+        note: "   ",
+      });
+
+      expect(clearedNoteHighlight).not.toBeNull();
+      expect(clearedNoteHighlight).toMatchObject({
+        id: "highlight-1",
+        color: "blue",
+        note: null,
+      });
+      expect(
+        repository.updateHighlight({
+          bookId: "book-1",
+          highlightId: "missing-highlight",
+          color: "rose",
+        }),
+      ).toBeNull();
+
+      expect(repository.deleteHighlight("book-1", "highlight-1")).toBe(true);
+      expect(repository.listHighlightsByBookId("book-1")).toEqual([]);
+      expect(repository.findProgressByBookId("book-1")).toEqual(progress);
+      expect(repository.listBookmarksByBookId("book-1")).toEqual([bookmark]);
+      expect(repository.deleteHighlight("book-1", "highlight-1")).toBe(false);
+    } finally {
+      storage.database.close();
+    }
+  });
 });
 
 describe("SettingsRepository", () => {
