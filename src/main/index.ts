@@ -24,6 +24,7 @@ import {
   BooksRepository,
   type BookmarkRecord,
   type BookRecord,
+  type HighlightRecord,
   type ReadingProgressRecord,
   type ReadingProgressSummary,
 } from "./storage/books-repository";
@@ -36,15 +37,22 @@ import type {
   BookmarkSummary,
   CreateBookmarkInput,
   CreateBookmarkResult,
+  CreateHighlightInput,
+  CreateHighlightResult,
   DeleteBookmarkInput,
   DeleteBookmarkResult,
+  DeleteHighlightInput,
+  DeleteHighlightResult,
   EpubDocumentLoadResult,
   EpubReaderLocation,
+  HighlightColor,
+  HighlightSummary,
   LibraryBookSummary,
   LibraryImportResult,
   LibraryOpenResult,
   LibraryRemoveResult,
   ListBookmarksResult,
+  ListHighlightsResult,
   PdfDocumentLoadResult,
   PdfReaderLocation,
   ReaderLocation,
@@ -52,6 +60,8 @@ import type {
   SaveReadingProgressResult,
   SettingsUpdateInput,
   SettingsUpdateResult,
+  UpdateHighlightInput,
+  UpdateHighlightResult,
 } from "../shared/papercase-api";
 
 app.setName("Papercase");
@@ -558,6 +568,158 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle(
+  "highlights:listHighlights",
+  (_event, bookId: unknown): ListHighlightsResult => {
+    if (typeof bookId !== "string" || bookId.trim().length === 0) {
+      return {
+        status: "failed",
+        message: "Highlights could not be loaded.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(bookId);
+
+      if (!book) {
+        return {
+          status: "failed",
+          message: "Highlights could not be loaded.",
+        };
+      }
+
+      return {
+        status: "loaded",
+        highlights: repository
+          .listHighlightsByBookId(book.id)
+          .map((highlight) =>
+            highlightRecordToSummary(highlight, book.format),
+          ),
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "Highlights could not be loaded.",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "highlights:createHighlight",
+  (_event, input: unknown): CreateHighlightResult => {
+    const highlightInput = parseCreateHighlightInput(input);
+
+    if (!highlightInput) {
+      return {
+        status: "failed",
+        message: "The highlight could not be saved.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(highlightInput.bookId);
+
+      if (!book || book.format !== highlightInput.format) {
+        return {
+          status: "failed",
+          message: "The highlight could not be saved.",
+        };
+      }
+
+      const highlight = repository.createHighlight({
+        bookId: highlightInput.bookId,
+        color: highlightInput.color ?? "yellow",
+        selectedText: highlightInput.selectedText,
+        location: highlightInput.location,
+        note: highlightInput.note ?? null,
+      });
+
+      return {
+        status: "created",
+        highlight: highlightRecordToSummary(highlight, book.format),
+      };
+    } catch {
+      return {
+        status: "failed",
+        message: "The highlight could not be saved.",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "highlights:updateHighlight",
+  (_event, input: unknown): UpdateHighlightResult => {
+    const highlightInput = parseUpdateHighlightInput(input);
+
+    if (!highlightInput) {
+      return {
+        status: "failed",
+        message: "The highlight could not be updated.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const book = repository.findById(highlightInput.bookId);
+
+      if (!book) {
+        return {
+          status: "not-found",
+        };
+      }
+
+      const highlight = repository.updateHighlight(highlightInput);
+
+      return highlight
+        ? {
+            status: "updated",
+            highlight: highlightRecordToSummary(highlight, book.format),
+          }
+        : {
+            status: "not-found",
+          };
+    } catch {
+      return {
+        status: "failed",
+        message: "The highlight could not be updated.",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "highlights:deleteHighlight",
+  (_event, input: unknown): DeleteHighlightResult => {
+    const deleteInput = parseDeleteHighlightInput(input);
+
+    if (!deleteInput) {
+      return {
+        status: "failed",
+        message: "The highlight could not be deleted.",
+      };
+    }
+
+    try {
+      const repository = getBooksRepository();
+      const deleted = repository.deleteHighlight(
+        deleteInput.bookId,
+        deleteInput.highlightId,
+      );
+
+      return deleted ? { status: "deleted" } : { status: "not-found" };
+    } catch {
+      return {
+        status: "failed",
+        message: "The highlight could not be deleted.",
+      };
+    }
+  },
+);
+
 function getStorage(): LocalStorage {
   if (!storage) {
     throw new Error("Papercase storage has not been initialized.");
@@ -637,6 +799,23 @@ function bookmarkRecordToSummary(
     ...base,
     format: "epub",
     location,
+  };
+}
+
+function highlightRecordToSummary(
+  highlight: HighlightRecord,
+  format: BookFormat,
+): HighlightSummary {
+  return {
+    id: highlight.id,
+    bookId: highlight.bookId,
+    format,
+    selectedText: highlight.selectedText,
+    location: highlight.location,
+    color: highlight.color,
+    note: highlight.note,
+    createdAt: highlight.createdAt,
+    updatedAt: highlight.updatedAt,
   };
 }
 
@@ -766,6 +945,90 @@ function parseDeleteBookmarkInput(input: unknown): DeleteBookmarkInput | null {
   };
 }
 
+function parseCreateHighlightInput(input: unknown): CreateHighlightInput | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  const color = input.color === undefined ? "yellow" : input.color;
+  const note = input.note === undefined ? null : input.note;
+
+  if (
+    typeof input.bookId !== "string" ||
+    input.bookId.trim().length === 0 ||
+    !isBookFormat(input.format) ||
+    typeof input.selectedText !== "string" ||
+    input.selectedText.trim().length === 0 ||
+    !isHighlightColor(color) ||
+    !isNullableString(note) ||
+    !isNonNullJsonSerializable(input.location)
+  ) {
+    return null;
+  }
+
+  return {
+    bookId: input.bookId,
+    format: input.format,
+    selectedText: input.selectedText.trim(),
+    location: input.location,
+    color,
+    note,
+  };
+}
+
+function parseUpdateHighlightInput(input: unknown): UpdateHighlightInput | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  if (
+    typeof input.bookId !== "string" ||
+    input.bookId.trim().length === 0 ||
+    typeof input.highlightId !== "string" ||
+    input.highlightId.trim().length === 0 ||
+    (input.color !== undefined && !isHighlightColor(input.color)) ||
+    (input.note !== undefined && !isNullableString(input.note)) ||
+    (input.color === undefined && input.note === undefined)
+  ) {
+    return null;
+  }
+
+  const highlightInput: UpdateHighlightInput = {
+    bookId: input.bookId,
+    highlightId: input.highlightId,
+  };
+
+  if (input.color !== undefined) {
+    highlightInput.color = input.color;
+  }
+
+  if (input.note !== undefined) {
+    highlightInput.note = input.note;
+  }
+
+  return highlightInput;
+}
+
+function parseDeleteHighlightInput(input: unknown): DeleteHighlightInput | null {
+  if (!isObject(input)) {
+    return null;
+  }
+
+  if (
+    typeof input.bookId !== "string" ||
+    input.bookId.trim().length === 0 ||
+    typeof input.highlightId !== "string" ||
+    input.highlightId.trim().length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    bookId: input.bookId,
+    highlightId: input.highlightId,
+  };
+}
+
 function parseEpubReaderLocation(input: unknown): EpubReaderLocation | null {
   if (!isObject(input)) {
     return null;
@@ -873,12 +1136,74 @@ function isNullableInteger(value: unknown): value is number | null {
   );
 }
 
+function isBookFormat(value: unknown): value is BookFormat {
+  return value === "pdf" || value === "epub";
+}
+
 function isAppTheme(value: unknown): value is AppTheme {
   return value === "system" || value === "light" || value === "dark";
 }
 
 function isPdfZoomMode(value: unknown): value is PdfReaderLocation["zoomMode"] {
   return value === "auto" || value === "actual" || value === "custom";
+}
+
+function isHighlightColor(value: unknown): value is HighlightColor {
+  return (
+    value === "yellow" ||
+    value === "green" ||
+    value === "blue" ||
+    value === "rose"
+  );
+}
+
+function isNonNullJsonSerializable(value: unknown): boolean {
+  return value !== null && isJsonSerializableValue(value);
+}
+
+function isJsonSerializableValue(
+  value: unknown,
+  seenObjects = new WeakSet<object>(),
+): boolean {
+  if (value === null) {
+    return true;
+  }
+
+  if (typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value !== "object") {
+    return false;
+  }
+
+  if (seenObjects.has(value)) {
+    return false;
+  }
+
+  seenObjects.add(value);
+
+  if (Array.isArray(value)) {
+    const isSerializable = value.every((item) =>
+      isJsonSerializableValue(item, seenObjects),
+    );
+
+    seenObjects.delete(value);
+
+    return isSerializable;
+  }
+
+  const isSerializable = Object.values(value).every((item) =>
+    isJsonSerializableValue(item, seenObjects),
+  );
+
+  seenObjects.delete(value);
+
+  return isSerializable;
 }
 
 app.whenReady().then(() => {

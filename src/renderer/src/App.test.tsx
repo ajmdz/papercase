@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   BookmarkSummary,
+  HighlightSummary,
   LibraryBookSummary,
   PapercaseApi,
 } from "../../shared/papercase-api";
@@ -228,6 +229,132 @@ describe("App", () => {
       bookmarkId: "bookmark-1",
     });
     expect(screen.getByText("No bookmarks yet.")).toBeInTheDocument();
+  });
+
+  it("shows saved highlights and edits them from the highlight popup", async () => {
+    const highlight = makeHighlight();
+    const colorUpdatedHighlight: HighlightSummary = {
+      ...highlight,
+      color: "blue",
+      updatedAt: "2026-06-14T00:01:00.000Z",
+    };
+    const noteUpdatedHighlight: HighlightSummary = {
+      ...colorUpdatedHighlight,
+      note: "Remember this",
+      updatedAt: "2026-06-14T00:02:00.000Z",
+    };
+    const listHighlights = vi.fn().mockResolvedValue({
+      status: "loaded",
+      highlights: [highlight],
+    });
+    const updateHighlight = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "updated",
+        highlight: colorUpdatedHighlight,
+      })
+      .mockResolvedValueOnce({
+        status: "updated",
+        highlight: noteUpdatedHighlight,
+      });
+    const deleteHighlight = vi.fn().mockResolvedValue({ status: "deleted" });
+
+    installPapercaseApi({
+      listBooks: vi.fn().mockResolvedValue([makeBook()]),
+      listHighlights,
+      updateHighlight,
+      deleteHighlight,
+    });
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Quiet Systems" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Show highlights and notes",
+      }),
+    );
+
+    expect(
+      await screen.findByText("Carefully highlighted sentence"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Edit highlight Carefully highlighted sentence",
+      }),
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "Highlight actions" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Blue highlight" }));
+
+    await waitFor(() => {
+      expect(updateHighlight).toHaveBeenCalledWith({
+        bookId: "book-1",
+        highlightId: "highlight-1",
+        color: "blue",
+      });
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Add a note"), {
+      target: { value: "Remember this" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+    await waitFor(() => {
+      expect(updateHighlight).toHaveBeenCalledWith({
+        bookId: "book-1",
+        highlightId: "highlight-1",
+        note: "Remember this",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText("Remember this").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText("Carefully highlighted sentence"),
+      ).not.toBeInTheDocument();
+    });
+    expect(deleteHighlight).toHaveBeenCalledWith({
+      bookId: "book-1",
+      highlightId: "highlight-1",
+    });
+    expect(screen.getByText("No highlights or notes yet.")).toBeInTheDocument();
+  });
+
+  it("shows highlight list errors without hiding the panel", async () => {
+    installPapercaseApi({
+      listBooks: vi.fn().mockResolvedValue([makeBook()]),
+      listHighlights: vi.fn().mockResolvedValue({
+        status: "failed",
+        message: "Highlights could not be loaded.",
+      }),
+    });
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Quiet Systems" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Show highlights and notes",
+      }),
+    );
+
+    expect(
+      await screen.findByText("Highlights could not be loaded."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Highlights and notes" }),
+    ).toBeInTheDocument();
   });
 
   it("routes EPUB books to the EPUB reader", async () => {
@@ -516,6 +643,21 @@ function installPapercaseApi({
   deleteBookmark = vi.fn().mockResolvedValue({
     status: "not-found",
   }),
+  listHighlights = vi.fn().mockResolvedValue({
+    status: "loaded",
+    highlights: [],
+  }),
+  createHighlight = vi.fn().mockResolvedValue({
+    status: "failed",
+    message: "The highlight could not be saved.",
+  }),
+  updateHighlight = vi.fn().mockResolvedValue({
+    status: "failed",
+    message: "The highlight could not be updated.",
+  }),
+  deleteHighlight = vi.fn().mockResolvedValue({
+    status: "not-found",
+  }),
 }: {
   listBooks: PapercaseApi["library"]["listBooks"];
   getSettings?: PapercaseApi["settings"]["getSettings"];
@@ -529,6 +671,10 @@ function installPapercaseApi({
   listBookmarks?: PapercaseApi["bookmarks"]["listBookmarks"];
   createBookmark?: PapercaseApi["bookmarks"]["createBookmark"];
   deleteBookmark?: PapercaseApi["bookmarks"]["deleteBookmark"];
+  listHighlights?: PapercaseApi["highlights"]["listHighlights"];
+  createHighlight?: PapercaseApi["highlights"]["createHighlight"];
+  updateHighlight?: PapercaseApi["highlights"]["updateHighlight"];
+  deleteHighlight?: PapercaseApi["highlights"]["deleteHighlight"];
 }): void {
   const api: PapercaseApi = {
     app: {
@@ -553,6 +699,12 @@ function installPapercaseApi({
       listBookmarks,
       createBookmark,
       deleteBookmark,
+    },
+    highlights: {
+      listHighlights,
+      createHighlight,
+      updateHighlight,
+      deleteHighlight,
     },
   };
 
@@ -581,6 +733,24 @@ function makeBookmark(
     updatedAt: "2026-06-14T00:00:00.000Z",
     ...overrides,
   };
+}
+
+function makeHighlight(overrides: Partial<HighlightSummary> = {}) {
+  return {
+    id: "highlight-1",
+    bookId: "book-1",
+    format: "pdf",
+    selectedText: "Carefully highlighted sentence",
+    location: {
+      kind: "pdf-selection",
+      pageNumber: 4,
+    },
+    color: "yellow",
+    note: null,
+    createdAt: "2026-06-14T00:00:00.000Z",
+    updatedAt: "2026-06-14T00:00:00.000Z",
+    ...overrides,
+  } satisfies HighlightSummary;
 }
 
 function makeBook(

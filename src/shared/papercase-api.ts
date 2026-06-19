@@ -69,6 +69,20 @@ export type EpubBookmark = {
 
 export type BookmarkSummary = PdfBookmark | EpubBookmark;
 
+export type HighlightColor = "yellow" | "green" | "blue" | "rose";
+
+export type HighlightSummary = {
+  id: string;
+  bookId: string;
+  format: LibraryBookFormat;
+  selectedText: string;
+  location: unknown;
+  color: HighlightColor;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type LibraryOpenResult =
   | {
       status: "ready";
@@ -266,6 +280,72 @@ export type DeleteBookmarkResult =
       message: string;
     };
 
+export type CreateHighlightInput = {
+  bookId: string;
+  format: LibraryBookFormat;
+  selectedText: string;
+  location: unknown;
+  color?: HighlightColor;
+  note?: string | null;
+};
+
+export type UpdateHighlightInput = {
+  bookId: string;
+  highlightId: string;
+  color?: HighlightColor;
+  note?: string | null;
+};
+
+export type DeleteHighlightInput = {
+  bookId: string;
+  highlightId: string;
+};
+
+export type ListHighlightsResult =
+  | {
+      status: "loaded";
+      highlights: HighlightSummary[];
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
+export type CreateHighlightResult =
+  | {
+      status: "created";
+      highlight: HighlightSummary;
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
+export type UpdateHighlightResult =
+  | {
+      status: "updated";
+      highlight: HighlightSummary;
+    }
+  | {
+      status: "not-found";
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
+export type DeleteHighlightResult =
+  | {
+      status: "deleted";
+    }
+  | {
+      status: "not-found";
+    }
+  | {
+      status: "failed";
+      message: string;
+    };
+
 export type PapercaseApi = {
   app: {
     getVersion: () => Promise<string>;
@@ -297,5 +377,17 @@ export type PapercaseApi = {
     deleteBookmark: (
       input: DeleteBookmarkInput,
     ) => Promise<DeleteBookmarkResult>;
+  };
+  highlights: {
+    listHighlights: (bookId: string) => Promise<ListHighlightsResult>;
+    createHighlight: (
+      input: CreateHighlightInput,
+    ) => Promise<CreateHighlightResult>;
+    updateHighlight: (
+      input: UpdateHighlightInput,
+    ) => Promise<UpdateHighlightResult>;
+    deleteHighlight: (
+      input: DeleteHighlightInput,
+    ) => Promise<DeleteHighlightResult>;
   };
 };

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import type { HighlightColor } from "../../shared/papercase-api";
 import type { BookFormat } from "./paths";
 
 export type BookRecord = {
@@ -37,6 +38,17 @@ export type BookmarkRecord = {
   updatedAt: string;
 };
 
+export type HighlightRecord = {
+  id: string;
+  bookId: string;
+  color: HighlightColor;
+  selectedText: string;
+  location: unknown;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type BookRecordWithProgress = BookRecord & {
   progress: ReadingProgressSummary | null;
 };
@@ -65,6 +77,22 @@ export type CreateBookmarkRecordInput = {
   bookId: string;
   location: unknown;
   label: string | null;
+};
+
+export type CreateHighlightRecordInput = {
+  id?: string;
+  bookId: string;
+  color: HighlightColor;
+  selectedText: string;
+  location: unknown;
+  note: string | null;
+};
+
+export type UpdateHighlightRecordInput = {
+  bookId: string;
+  highlightId: string;
+  color?: HighlightColor;
+  note?: string | null;
 };
 
 type BookRow = {
@@ -101,6 +129,17 @@ type BookmarkRow = {
   book_id: string;
   location_json: string;
   label: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type HighlightRow = {
+  id: string;
+  book_id: string;
+  color: HighlightColor;
+  selected_text: string;
+  location_json: string;
+  note: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -337,6 +376,124 @@ export class BooksRepository {
 
     return Number(result.changes) > 0;
   }
+
+  listHighlightsByBookId(bookId: string): HighlightRecord[] {
+    return this.database
+      .prepare(
+        `
+          SELECT *
+          FROM highlights
+          WHERE book_id = ?
+          ORDER BY created_at DESC, id ASC
+        `,
+      )
+      .all(bookId)
+      .map((row) => rowToHighlightRecord(row as HighlightRow));
+  }
+
+  createHighlight(input: CreateHighlightRecordInput): HighlightRecord {
+    const now = new Date().toISOString();
+    const record: HighlightRecord = {
+      id: input.id ?? randomUUID(),
+      bookId: input.bookId,
+      color: input.color,
+      selectedText: input.selectedText.trim(),
+      location: input.location,
+      note: normalizeOptionalText(input.note),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.database
+      .prepare(
+        `
+          INSERT INTO highlights (
+            id,
+            book_id,
+            color,
+            selected_text,
+            location_json,
+            note,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        record.id,
+        record.bookId,
+        record.color,
+        record.selectedText,
+        JSON.stringify(record.location),
+        record.note,
+        record.createdAt,
+        record.updatedAt,
+      );
+
+    return record;
+  }
+
+  updateHighlight(
+    input: UpdateHighlightRecordInput,
+  ): HighlightRecord | null {
+    const existing = this.findHighlightByBookAndId(
+      input.bookId,
+      input.highlightId,
+    );
+
+    if (!existing) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const nextRecord: HighlightRecord = {
+      ...existing,
+      color: input.color ?? existing.color,
+      note:
+        input.note === undefined
+          ? existing.note
+          : normalizeOptionalText(input.note),
+      updatedAt: now,
+    };
+
+    this.database
+      .prepare(
+        `
+          UPDATE highlights
+          SET color = ?, note = ?, updated_at = ?
+          WHERE book_id = ? AND id = ?
+        `,
+      )
+      .run(
+        nextRecord.color,
+        nextRecord.note,
+        nextRecord.updatedAt,
+        input.bookId,
+        input.highlightId,
+      );
+
+    return nextRecord;
+  }
+
+  deleteHighlight(bookId: string, highlightId: string): boolean {
+    const result = this.database
+      .prepare("DELETE FROM highlights WHERE book_id = ? AND id = ?")
+      .run(bookId, highlightId);
+
+    return Number(result.changes) > 0;
+  }
+
+  private findHighlightByBookAndId(
+    bookId: string,
+    highlightId: string,
+  ): HighlightRecord | null {
+    const row = this.database
+      .prepare("SELECT * FROM highlights WHERE book_id = ? AND id = ?")
+      .get(bookId, highlightId) as HighlightRow | undefined;
+
+    return row ? rowToHighlightRecord(row) : null;
+  }
 }
 
 function rowToBookRecord(row: BookRow): BookRecord {
@@ -393,4 +550,27 @@ function rowToBookmarkRecord(row: BookmarkRow): BookmarkRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function rowToHighlightRecord(row: HighlightRow): HighlightRecord {
+  return {
+    id: row.id,
+    bookId: row.book_id,
+    color: row.color,
+    selectedText: row.selected_text,
+    location: JSON.parse(row.location_json) as unknown,
+    note: row.note,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function normalizeOptionalText(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+
+  return trimmedValue.length > 0 ? trimmedValue : null;
 }

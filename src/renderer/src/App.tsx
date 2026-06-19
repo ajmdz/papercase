@@ -5,6 +5,8 @@ import type {
   BookmarkSummary,
   CreateBookmarkInput,
   EpubReaderLocation,
+  HighlightColor,
+  HighlightSummary,
   LibraryBookSummary,
   LibraryImportResult,
   LibraryRemoveResult,
@@ -62,6 +64,16 @@ const themeOptions: Array<{ label: string; value: AppTheme }> = [
   { label: "System", value: "system" },
   { label: "Light", value: "light" },
   { label: "Dark", value: "dark" },
+];
+
+const highlightColorOptions: Array<{
+  label: string;
+  value: HighlightColor;
+}> = [
+  { label: "Yellow highlight", value: "yellow" },
+  { label: "Green highlight", value: "green" },
+  { label: "Blue highlight", value: "blue" },
+  { label: "Rose highlight", value: "rose" },
 ];
 
 function App(): ReactElement {
@@ -533,8 +545,21 @@ function ReaderShell({
   const [bookmarkErrorMessage, setBookmarkErrorMessage] = useState<
     string | null
   >(null);
+  const [highlights, setHighlights] = useState<HighlightSummary[]>([]);
+  const [highlightErrorMessage, setHighlightErrorMessage] = useState<
+    string | null
+  >(null);
+  const [editingHighlightId, setEditingHighlightId] = useState<string | null>(
+    null,
+  );
   const [isBookmarkingLocation, setIsBookmarkingLocation] = useState(false);
   const [deletingBookmarkId, setDeletingBookmarkId] = useState<string | null>(
+    null,
+  );
+  const [savingHighlightId, setSavingHighlightId] = useState<string | null>(
+    null,
+  );
+  const [deletingHighlightId, setDeletingHighlightId] = useState<string | null>(
     null,
   );
   const [epubFontSizePercent, setEpubFontSizePercent] =
@@ -598,6 +623,46 @@ function ReaderShell({
         if (isMounted) {
           setBookmarkErrorMessage("Bookmarks could not be loaded.");
           setBookmarks([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [view.book.id, view.status]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const api = window.papercase?.highlights;
+
+    if (view.status !== "ready") {
+      return;
+    }
+
+    if (!api) {
+      return;
+    }
+
+    api
+      .listHighlights(view.book.id)
+      .then((result) => {
+        if (!isMounted) {
+          return;
+        }
+
+        if (result.status === "failed") {
+          setHighlightErrorMessage(result.message);
+          setHighlights([]);
+          return;
+        }
+
+        setHighlightErrorMessage(null);
+        setHighlights(result.highlights);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setHighlightErrorMessage("Highlights could not be loaded.");
+          setHighlights([]);
         }
       });
 
@@ -769,6 +834,113 @@ function ReaderShell({
     setActiveReaderPanel(null);
   }
 
+  function handleHighlightSelect(highlightId: string): void {
+    setHighlightErrorMessage(null);
+    setEditingHighlightId((currentHighlightId) =>
+      currentHighlightId === highlightId ? null : highlightId,
+    );
+  }
+
+  async function handleHighlightColorChange(
+    highlightId: string,
+    color: HighlightColor,
+  ): Promise<void> {
+    await updateHighlight(highlightId, { color });
+  }
+
+  async function handleHighlightNoteSave(
+    highlightId: string,
+    note: string | null,
+  ): Promise<void> {
+    await updateHighlight(highlightId, { note });
+  }
+
+  async function updateHighlight(
+    highlightId: string,
+    update: {
+      color?: HighlightColor;
+      note?: string | null;
+    },
+  ): Promise<void> {
+    const api = window.papercase?.highlights;
+
+    if (!api || savingHighlightId) {
+      return;
+    }
+
+    setHighlightErrorMessage(null);
+    setSavingHighlightId(highlightId);
+
+    try {
+      const result = await api.updateHighlight({
+        bookId: view.book.id,
+        highlightId,
+        ...update,
+      });
+
+      if (result.status === "failed") {
+        setHighlightErrorMessage(result.message);
+        setActiveReaderPanel("highlights");
+        return;
+      }
+
+      if (result.status === "not-found") {
+        setHighlights((currentHighlights) =>
+          currentHighlights.filter((highlight) => highlight.id !== highlightId),
+        );
+        setEditingHighlightId(null);
+        return;
+      }
+
+      setHighlights((currentHighlights) =>
+        currentHighlights.map((highlight) =>
+          highlight.id === result.highlight.id ? result.highlight : highlight,
+        ),
+      );
+    } catch {
+      setHighlightErrorMessage("The highlight could not be updated.");
+      setActiveReaderPanel("highlights");
+    } finally {
+      setSavingHighlightId(null);
+    }
+  }
+
+  async function handleHighlightDelete(highlightId: string): Promise<void> {
+    const api = window.papercase?.highlights;
+
+    if (!api || deletingHighlightId) {
+      return;
+    }
+
+    setHighlightErrorMessage(null);
+    setDeletingHighlightId(highlightId);
+
+    try {
+      const result = await api.deleteHighlight({
+        bookId: view.book.id,
+        highlightId,
+      });
+
+      if (result.status === "failed") {
+        setHighlightErrorMessage(result.message);
+        setActiveReaderPanel("highlights");
+        return;
+      }
+
+      setHighlights((currentHighlights) =>
+        currentHighlights.filter((highlight) => highlight.id !== highlightId),
+      );
+      setEditingHighlightId((currentHighlightId) =>
+        currentHighlightId === highlightId ? null : currentHighlightId,
+      );
+    } catch {
+      setHighlightErrorMessage("The highlight could not be deleted.");
+      setActiveReaderPanel("highlights");
+    } finally {
+      setDeletingHighlightId(null);
+    }
+  }
+
   function changeEpubFontSize(delta: number): void {
     setEpubFontSizePercent((currentFontSize) =>
       clampEpubFontSize(currentFontSize + delta),
@@ -861,9 +1033,18 @@ function ReaderShell({
               bookmarks={bookmarks}
               contents={readerContents}
               deletingBookmarkId={deletingBookmarkId}
+              deletingHighlightId={deletingHighlightId}
+              editingHighlightId={editingHighlightId}
+              highlightErrorMessage={highlightErrorMessage}
+              highlights={highlights}
               locationLabel={locationLabel}
+              savingHighlightId={savingHighlightId}
               onClose={() => setActiveReaderPanel(null)}
               onDeleteBookmark={handleBookmarkDelete}
+              onDeleteHighlight={handleHighlightDelete}
+              onHighlightColorChange={handleHighlightColorChange}
+              onHighlightNoteSave={handleHighlightNoteSave}
+              onSelectHighlight={handleHighlightSelect}
               onSelectBookmark={handleBookmarkSelect}
               onSelectContent={handleReaderContentSelect}
             />
@@ -957,9 +1138,18 @@ function ReaderPanelContent({
   bookmarks,
   contents,
   deletingBookmarkId,
+  deletingHighlightId,
+  editingHighlightId,
+  highlightErrorMessage,
+  highlights,
   locationLabel,
+  savingHighlightId,
   onClose,
   onDeleteBookmark,
+  onDeleteHighlight,
+  onHighlightColorChange,
+  onHighlightNoteSave,
+  onSelectHighlight,
   onSelectBookmark,
   onSelectContent,
 }: {
@@ -968,9 +1158,21 @@ function ReaderPanelContent({
   bookmarks: BookmarkSummary[];
   contents: ReaderContentsItem[];
   deletingBookmarkId: string | null;
+  deletingHighlightId: string | null;
+  editingHighlightId: string | null;
+  highlightErrorMessage: string | null;
+  highlights: HighlightSummary[];
   locationLabel: string;
+  savingHighlightId: string | null;
   onClose: () => void;
   onDeleteBookmark: (bookmarkId: string) => void;
+  onDeleteHighlight: (highlightId: string) => void;
+  onHighlightColorChange: (
+    highlightId: string,
+    color: HighlightColor,
+  ) => void;
+  onHighlightNoteSave: (highlightId: string, note: string | null) => void;
+  onSelectHighlight: (highlightId: string) => void;
   onSelectBookmark: (bookmark: BookmarkSummary) => void;
   onSelectContent: (item: ReaderContentsItem) => void;
 }): ReactElement {
@@ -1048,7 +1250,144 @@ function ReaderPanelContent({
   return (
     <section className="reader-panel-section">
       <h2>Highlights and notes</h2>
-      <p>No highlights or notes yet.</p>
+      {highlightErrorMessage ? (
+        <p className="reader-panel-error" role="alert">
+          {highlightErrorMessage}
+        </p>
+      ) : null}
+      {highlights.length === 0 ? <p>No highlights or notes yet.</p> : null}
+      {highlights.length > 0 ? (
+        <div className="reader-highlight-list">
+          {highlights.map((highlight) => (
+            <article className="reader-highlight-row" key={highlight.id}>
+              <button
+                aria-expanded={editingHighlightId === highlight.id}
+                aria-label={`Edit highlight ${highlightPreviewText(
+                  highlight.selectedText,
+                )}`}
+                className="reader-highlight-jump"
+                type="button"
+                onClick={() => onSelectHighlight(highlight.id)}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`reader-highlight-swatch is-${highlight.color}`}
+                />
+                <span className="reader-highlight-copy">
+                  <span>{highlightPreviewText(highlight.selectedText)}</span>
+                  <span>
+                    {highlight.note
+                      ? highlight.note
+                      : formatHighlightDate(highlight.createdAt)}
+                  </span>
+                </span>
+              </button>
+
+              {editingHighlightId === highlight.id ? (
+                <HighlightSelectionPopup
+                  color={highlight.color}
+                  deleting={deletingHighlightId === highlight.id}
+                  note={highlight.note}
+                  saving={savingHighlightId === highlight.id}
+                  selectedText={highlight.selectedText}
+                  onColorChange={(color) =>
+                    onHighlightColorChange(highlight.id, color)
+                  }
+                  onDelete={() => onDeleteHighlight(highlight.id)}
+                  onNoteSave={(note) =>
+                    onHighlightNoteSave(highlight.id, note)
+                  }
+                />
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function HighlightSelectionPopup({
+  color,
+  deleting,
+  note,
+  saving,
+  selectedText,
+  onColorChange,
+  onDelete,
+  onNoteSave,
+}: {
+  color: HighlightColor;
+  deleting: boolean;
+  note: string | null;
+  saving: boolean;
+  selectedText: string;
+  onColorChange: (color: HighlightColor) => void;
+  onDelete: () => void;
+  onNoteSave: (note: string | null) => void;
+}): ReactElement {
+  const [draftNote, setDraftNote] = useState(note ?? "");
+
+  function handleNoteSave(): void {
+    const trimmedNote = draftNote.trim();
+    onNoteSave(trimmedNote.length > 0 ? trimmedNote : null);
+  }
+
+  return (
+    <section
+      aria-label="Highlight actions"
+      className="reader-selection-popup"
+      role="dialog"
+    >
+      <p className="reader-selection-text">
+        {highlightPreviewText(selectedText)}
+      </p>
+      <div className="reader-highlight-color-list" aria-label="Highlight color">
+        {highlightColorOptions.map((option) => (
+          <button
+            aria-label={option.label}
+            aria-pressed={color === option.value}
+            className={`reader-highlight-color-button is-${option.value}${
+              color === option.value ? " is-selected" : ""
+            }`}
+            disabled={saving || deleting}
+            key={option.value}
+            title={option.label}
+            type="button"
+            onClick={() => onColorChange(option.value)}
+          >
+            <span aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+      <label className="reader-highlight-note-field">
+        <span>Note</span>
+        <textarea
+          rows={3}
+          value={draftNote}
+          placeholder="Add a note"
+          disabled={saving || deleting}
+          onChange={(event) => setDraftNote(event.target.value)}
+        />
+      </label>
+      <div className="reader-selection-popup-actions">
+        <button
+          className="secondary-button"
+          disabled={saving || deleting}
+          type="button"
+          onClick={handleNoteSave}
+        >
+          {saving ? "Saving" : "Save note"}
+        </button>
+        <button
+          className="reader-selection-delete"
+          disabled={saving || deleting}
+          type="button"
+          onClick={onDelete}
+        >
+          {deleting ? "Deleting" : "Delete"}
+        </button>
+      </div>
     </section>
   );
 }
@@ -1623,6 +1962,14 @@ function bookmarkDisplayLabel(bookmark: BookmarkSummary): string {
   }
 
   return bookmark.location.chapterTitle ?? "EPUB bookmark";
+}
+
+function highlightPreviewText(selectedText: string): string {
+  return selectedText.replace(/\s+/g, " ").trim();
+}
+
+function formatHighlightDate(createdAt: string): string {
+  return formatBookmarkDate(createdAt);
 }
 
 function formatBookmarkDate(createdAt: string): string {
